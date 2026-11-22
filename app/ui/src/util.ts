@@ -38,6 +38,7 @@ const P: Record<string, string> = {
   app: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9h17"/><path d="M6.6 6.8h.01M9 6.8h.01" stroke-width="2.2"/>',
   archive: '<path d="M12 3.3 20 7.4v9.2l-8 4.1-8-4.1V7.4z"/><path d="m4 7.4 8 4.1 8-4.1M12 11.5v9.2M8 5.3l8 4.1"/>',
   doc: '<path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5M9 12.5h6M9 16h6"/>',
+  gamepad: '<rect x="2.5" y="6.5" width="19" height="11" rx="4.5"/><path d="M7.5 10v4M5.5 12h4"/><circle cx="15.5" cy="10.5" r="1"/><circle cx="17.5" cy="13.5" r="1"/>',
   image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.7"/><path d="m20.5 15.5-4.5-4.5-9.5 8.5"/>',
   file: '<path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3.5V8h4.5"/>',
 };
@@ -47,6 +48,7 @@ export const icon = (n: IconName): string =>
 
 export interface Cat { color: string; icon: string }
 export const CATS: Record<string, Cat> = {
+  Games: { color: "#14b8a6", icon: "gamepad" },
   Video: { color: "#8b5cf6", icon: "video" },
   Music: { color: "#ec4899", icon: "music" },
   Programs: { color: "#3b82f6", icon: "app" },
@@ -60,6 +62,7 @@ export const catInfo = (name: string | null | undefined): Cat => CATS[name ?? ""
 /** The category a file name falls in, by extension (matches the backend). */
 export function catOf(name: string | null | undefined): string {
   const e = (/\.([a-z0-9]{1,5})$/i.exec(name || "") || [])[1]?.toLowerCase() || "";
+  if (/^(nsp|xci|nsz|cia|3ds|nds|gba|gbc|gb|sfc|smc|nes|n64|z64|v64|gcm|wbfs|rvz|chd|cso|pbp|vpk|xbe|xex|wad|pak|vdf|rpf)$/.test(e)) return "Games";
   if (/^(zip|rar|7z|tar|gz|tgz|xz|bz2|zst|iso|img)$/.test(e)) return "Compressed";
   if (/^(pdf|docx?|xlsx?|pptx?|odt|txt|rtf|epub|csv|md)$/.test(e)) return "Documents";
   if (/^(mp3|wav|flac|aac|ogg|m4a|opus|wma)$/.test(e)) return "Music";
@@ -67,6 +70,17 @@ export function catOf(name: string | null | undefined): string {
   if (/^(exe|msi|dmg|pkg|deb|rpm|apk|appimage|msix|bat|jar)$/.test(e)) return "Programs";
   if (/^(jpe?g|png|gif|webp|svg|bmp|heic|avif)$/.test(e)) return "Images";
   return "Other";
+}
+
+/** Detects MD5 (32), SHA-1 (40), SHA-256 (64), or SHA-512 (128) hex checksums. */
+export function checksumAlgo(sum: string | null | undefined): "MD5" | "SHA-1" | "SHA-256" | "SHA-512" | null {
+  const s = (sum || "").trim();
+  if (!/^[a-f0-9]+$/i.test(s)) return null;
+  if (s.length === 32) return "MD5";
+  if (s.length === 40) return "SHA-1";
+  if (s.length === 64) return "SHA-256";
+  if (s.length === 128) return "SHA-512";
+  return null;
 }
 
 const UNITS = ["B", "KB", "MB", "GB", "TB"];
@@ -118,10 +132,22 @@ export function fileIcon(name: string, category?: string, size = 36): string {
 // of it, with a hairline where one part ends and the next begins, so the bar
 // shows both overall progress and how the parts are going.
 export function segBar(el: HTMLElement, size: number | null, segments: [number, number, number][] | undefined, pct: number) {
+  el.setAttribute("role", "progressbar");
+  el.setAttribute("aria-valuemin", "0");
+  el.setAttribute("aria-valuemax", "100");
+  el.setAttribute("aria-valuenow", String(Math.max(0, Math.min(100, Math.round(pct)))));
+
   const segs = size ? (segments || []).filter(([s, , e]) => e > s) : [];
-  const fills: [number, number][] = segs.length ? segs.map(([s, p]) => [(s / size!) * 100, ((p - s) / size!) * 100]) : [[0, pct]];
+  const fills: { l: number; w: number; live: boolean; done: boolean }[] = segs.length
+    ? segs.map(([s, p, e]) => ({ l: (s / size!) * 100, w: ((p - s) / size!) * 100, live: p > s && p < e, done: p >= e }))
+    : [{ l: 0, w: pct, live: false, done: pct >= 100 }];
   const marks = segs.slice(1).map(([s]) => (s / size!) * 100);
   if (el.childElementCount !== fills.length + marks.length) el.innerHTML = "<i></i>".repeat(fills.length) + "<b></b>".repeat(marks.length);
-  fills.forEach(([l, w], k) => { const i = el.children[k] as HTMLElement; i.style.left = `${l}%`; i.style.width = `${w}%`; });
+  fills.forEach((f, k) => {
+    const i = el.children[k] as HTMLElement;
+    i.style.left = `${f.l}%`;
+    i.style.width = `${f.w}%`;
+    i.className = f.done ? "done" : f.live ? "live" : "";
+  });
   marks.forEach((l, k) => { (el.children[fills.length + k] as HTMLElement).style.left = `${l}%`; });
 }

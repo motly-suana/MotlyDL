@@ -1,22 +1,41 @@
-// SwiftDL browser integration.
+// MotlyDL browser integration.
 //
-// 1. Catches downloads the browser starts and hands them to the SwiftDL app
+// 1. Catches downloads the browser starts and hands them to the MotlyDL app
 //    (through native messaging), with the cookies and referrer the site
 //    expects, so downloads behind a login keep working. If the app isn't
 //    installed or refuses, the browser simply finishes the download itself.
 // 2. Watches each tab's network traffic for video and audio files so the
 //    page button and the popup can offer them for download.
 
-const HOST = "com.swiftdl.host";
-const DEFAULTS = { enabled: true, minSizeKB: 0, disabledSites: [] };
+if (typeof globalThis.MotlyDLCapture === "undefined" && typeof importScripts === "function") {
+  importScripts("capture.js");
+}
+const CAP = globalThis.MotlyDLCapture;
 
-const getSettings = () => chrome.storage.sync.get(DEFAULTS);
+const HOST = "com.motlydl.host";
+const DEFAULTS = { enabled: true, minSizeKB: 1024, disabledSites: [] };
+const ANTI_LOOP_MS = 30_000;
+
+let cachedSettings = { ...DEFAULTS };
+const getSettings = async () => {
+  const s = await chrome.storage.sync.get(DEFAULTS);
+  cachedSettings = s;
+  return s;
+};
+chrome.storage.sync.get(DEFAULTS).then((s) => { cachedSettings = s; }).catch(() => {});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync") return;
+  for (const [k, { newValue }] of Object.entries(changes)) {
+    if (k in DEFAULTS && newValue !== undefined) cachedSettings[k] = newValue;
+  }
+});
+
 const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 
 // Last few events, kept for troubleshooting (service worker console or
 // chrome.storage.local "log").
 async function log(event) {
-  console.log("SwiftDL:", event);
+  console.log("MotlyDL:", event);
   const { log: entries = [] } = await chrome.storage.local.get("log");
   entries.push(`${new Date().toISOString()} ${event}`);
   await chrome.storage.local.set({ log: entries.slice(-30) });
@@ -33,18 +52,21 @@ async function cookieHeader(url) {
   }
 }
 
-async function sendToApp({ url, referrer, filename, qualities, pick }) {
+async function sendToApp({ url, referrer, pageUrl, filename, contentType, contentLength, userAgent, qualities, pick }) {
   const message = {
     type: "download",
     url,
     referrer: referrer || "",
+    pageUrl: pageUrl || referrer || "",
     filename: filename ? filename.split(/[\\/]/).pop() : "",
+    contentType: contentType || null,
+    contentLength: contentLength > 0 ? contentLength : null,
     cookies: await cookieHeader(url),
-    userAgent: navigator.userAgent,
+    userAgent: userAgent || navigator.userAgent,
     // A video's qualities, read from the page, so the app needn't look them up.
     ...(qualities ? { qualities, pick } : {}),
   };
-  // The browser starts SwiftDL for this message even when the app is
+  // The browser starts MotlyDL for this message even when the app is
   // closed. A start that fails once (the computer is busy, an update is
   // still being written) usually works a moment later, so try twice.
   let reply;
@@ -55,7 +77,7 @@ async function sendToApp({ url, referrer, filename, qualities, pick }) {
     await new Promise((r) => setTimeout(r, 800));
     reply = await chrome.runtime.sendNativeMessage(HOST, message);
   }
-  if (!reply?.ok) throw new Error(reply?.error || "SwiftDL did not accept the download");
+  if (!reply?.ok) throw new Error(reply?.error || "MotlyDL did not accept the download");
 }
 
 const ping = () =>
@@ -80,34 +102,253 @@ async function siteDisabled(url) {
   return !!host && disabledSites.includes(host);
 }
 
-// "Download in browser" in the app opens the link with #swiftdl-browser on the
+// "Download in browser" in the app opens the link with #motlydl-browser on the
 // end. The browser then keeps that one download, with its own session.
 const browserOnce = new Map();
-const markBrowser = (u) => { if (typeof u === "string" && u.includes("#swiftdl-browser")) browserOnce.set(u.split("#")[0], Date.now() + 60000); };
+function pruneExpired(map, now = Date.now()) {
+  for (const [k, until] of map) {
+    if (until <= now) map.delete(k);
+  }
+}
+const markBrowser = (u) => {
+  if (typeof u === "string" && u.includes("#motlydl-browser")) {
+    const now = Date.now();
+    pruneExpired(browserOnce, now);
+    browserOnce.set(u.split("#")[0], now + 60000);
+  }
+};
 chrome.tabs.onCreated.addListener((t) => markBrowser(t.pendingUrl || t.url));
 chrome.tabs.onUpdated.addListener((_id, info) => markBrowser(info.url));
+
+// Anti-loop guard: URLs handed back to the browser after an error/refusal are
+// not re-captured within 30 seconds (persisted in session storage across SW restarts).
+const handedBack = new Map();
+const recentIntercepted = new Map();
+
+async function loadHandedBack() {
+  const now = Date.now();
+  try {
+    const { handedBack: stored = {} } = await chrome.storage.session.get("handedBack");
+    for (const [k, until] of Object.entries(stored)) {
+      if (until > now && !(handedBack.get(k) > until)) handedBack.set(k, until);
+    }
+  } catch {}
+  for (const [k, until] of handedBack) {
+    if (until <= now) handedBack.delete(k);
+  }
+  return handedBack;
+}
+
+async function markHandedBack(urls) {
+  const until = Date.now() + ANTI_LOOP_MS;
+  for (const raw of urls) {
+    if (typeof raw === "string" && /^https?:/i.test(raw)) {
+      handedBack.set(raw.split("#")[0], until);
+    }
+  }
+  const now = Date.now();
+  const obj = {};
+  for (const [k, v] of handedBack) {
+    if (v > now) obj[k] = v;
+  }
+  try { await chrome.storage.session.set({ handedBack: obj }); } catch {}
+}
+
+// Non-blocking request/response header observation (Chromium MV3 + Firefox) to
+// preserve Referer, User-Agent, redirects, Content-Disposition, Content-Type, Content-Length.
+const metaStore = CAP.createMetaStore({ maxEntries: 300, ttlMs: 60_000 });
+
+function addWebRequestListener(event, listener, filter, primaryExtra, fallbackExtra) {
+  try {
+    event.addListener(listener, filter, primaryExtra);
+    return true;
+  } catch {
+    if (!fallbackExtra) return false;
+    try {
+      event.addListener(listener, filter, fallbackExtra);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+addWebRequestListener(
+  chrome.webRequest.onBeforeSendHeaders,
+  (d) => {
+    if (!cachedSettings.enabled) return;
+    metaStore.recordRequestHeaders(d.requestId, d.url, d.requestHeaders, d.documentUrl || d.initiator || "");
+  },
+  { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "other"] },
+  ["requestHeaders", "extraHeaders"],
+  ["requestHeaders"],
+);
+
+chrome.webRequest.onBeforeRedirect.addListener(
+  (d) => {
+    if (!cachedSettings.enabled) return;
+    metaStore.recordRedirect(d.requestId, d.url, d.redirectUrl);
+  },
+  { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "other"] },
+);
+
+addWebRequestListener(
+  chrome.webRequest.onHeadersReceived,
+  (d) => {
+    if (!cachedSettings.enabled) return;
+    if (d.statusCode >= 200 && d.statusCode < 400) {
+      metaStore.recordResponseHeaders(d.requestId, d.url, d.responseHeaders);
+    }
+  },
+  { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "other"] },
+  ["responseHeaders", "extraHeaders"],
+  ["responseHeaders"],
+);
+
+// Firefox MV3 supports async blocking onHeadersReceived: cancel before Firefox creates
+// a download item, only after MotlyDL confirms acceptance (fail-open otherwise).
+const firefoxBlocking = typeof browser !== "undefined" && !!browser.webRequest?.onHeadersReceived;
+if (firefoxBlocking) {
+  addWebRequestListener(
+    browser.webRequest.onHeadersReceived,
+    (d) => {
+      if (!cachedSettings.enabled) return {};
+      const decision = CAP.isDownloadableResponse({
+        method: d.method,
+        statusCode: d.statusCode,
+        type: d.type,
+        url: d.url,
+        headers: d.responseHeaders,
+      });
+      if (!decision.capture) return {};
+
+      const meta = metaStore.lookup(d.url, null, d.requestId);
+      const referrer = meta?.referer || d.originUrl || d.documentUrl || "";
+      const pageUrl = meta?.pageUrl || d.documentUrl || d.originUrl || referrer;
+      const quickSkip = CAP.shouldSkipCapture({
+        url: d.url,
+        finalUrl: d.url,
+        referrer,
+        pageUrl,
+        sizeBytes: decision.contentLength || 0,
+        byExtensionId: null,
+        settings: cachedSettings,
+        now: Date.now(),
+        bypassUntil,
+        handedBack,
+        browserOnce,
+      });
+      if (quickSkip.skip) {
+        log(`ff skipped (${quickSkip.reason}) ${d.url}`);
+        return {};
+      }
+
+      return (async () => {
+        const [settings, persistedHanded] = await Promise.all([getSettings(), loadHandedBack()]);
+        const skipCheck = CAP.shouldSkipCapture({
+          url: d.url,
+          finalUrl: d.url,
+          referrer,
+          pageUrl,
+          sizeBytes: decision.contentLength || 0,
+          byExtensionId: null,
+          settings,
+          now: Date.now(),
+          bypassUntil,
+          handedBack: persistedHanded,
+          browserOnce,
+        });
+        if (skipCheck.skip) {
+          if (skipCheck.clearBypass) bypassUntil = 0;
+          await log(`ff skipped (${skipCheck.reason}) ${d.url}`);
+          return {};
+        }
+        try {
+          await sendToApp({
+            url: d.url,
+            referrer,
+            pageUrl,
+            filename: decision.filename || meta?.filename || "",
+            contentType: decision.contentType,
+            contentLength: decision.contentLength,
+            userAgent: meta?.userAgent || navigator.userAgent,
+          });
+          const now = Date.now();
+          pruneExpired(recentIntercepted, now);
+          recentIntercepted.set(d.url.split("#")[0], now + 15_000);
+          await log(`ff handed to MotlyDL: ${d.url}`);
+          flashBadge("✓", "#2f9e6a", d.tabId >= 0 ? d.tabId : undefined);
+          return { cancel: true };
+        } catch (err) {
+          await markHandedBack([d.url]);
+          await log(`ff left to browser: ${err?.message || err}`);
+          flashBadge("!", "#dc4b4b", d.tabId >= 0 ? d.tabId : undefined);
+          return {};
+        }
+      })();
+    },
+    { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame"] },
+    ["blocking", "responseHeaders"],
+    null,
+  );
+}
 
 chrome.downloads.onCreated.addListener(async (item) => {
   const settings = await getSettings();
   const url = item.finalUrl || item.url;
   await log(`created #${item.id} state=${item.state} ${url}`);
-  if (!settings.enabled || item.state !== "in_progress") return;
-  // blob:, data: and file: URLs only exist inside the browser.
-  if (!/^https?:/i.test(url)) return;
-  if (Date.now() < bypassUntil) { bypassUntil = 0; await log(`#${item.id} Alt held: left to the browser`); return; }
-  if ([item.url, item.finalUrl, url].some((u) => u && (browserOnce.get(String(u).split("#")[0]) || 0) > Date.now())) { await log(`#${item.id} kept by the browser, as asked in SwiftDL`); return; }
-  if (await siteDisabled(item.referrer || url)) return;
-  if (settings.minSizeKB > 0 && item.totalBytes > 0 && item.totalBytes < settings.minSizeKB * 1024) return;
+  if (item.state !== "in_progress") return;
+  const recentExpiry = recentIntercepted.get(url.split("#")[0]) || recentIntercepted.get((item.url || "").split("#")[0]) || 0;
+  if (recentExpiry > Date.now()) {
+    await log(`#${item.id} already handled by blocking webRequest`);
+    return;
+  }
+
+  const meta = metaStore.lookup(item.url, item.finalUrl);
+  const persistedHanded = await loadHandedBack();
+  const referrer = item.referrer || meta?.referer || "";
+  const pageUrl = meta?.pageUrl || referrer;
+  const sizeBytes = item.totalBytes > 0 ? item.totalBytes : (meta?.contentLength || 0);
+  const filename = meta?.filename || item.filename || "";
+
+  const skipCheck = CAP.shouldSkipCapture({
+    url,
+    finalUrl: item.finalUrl,
+    rawUrl: item.url,
+    referrer,
+    pageUrl,
+    sizeBytes,
+    byExtensionId: item.byExtensionId,
+    settings,
+    now: Date.now(),
+    bypassUntil,
+    handedBack: persistedHanded,
+    browserOnce,
+  });
+  if (skipCheck.skip) {
+    if (skipCheck.clearBypass) bypassUntil = 0;
+    await log(`#${item.id} skipped (${skipCheck.reason})`);
+    return;
+  }
 
   // Pause first so the browser doesn't keep downloading while we ask the app.
   await chrome.downloads.pause(item.id).catch(() => {});
   try {
-    await sendToApp({ url, referrer: item.referrer, filename: item.filename });
+    await sendToApp({
+      url,
+      referrer,
+      pageUrl,
+      filename,
+      contentType: meta?.contentType || item.mime || null,
+      contentLength: sizeBytes > 0 ? sizeBytes : null,
+      userAgent: meta?.userAgent || navigator.userAgent,
+    });
     await chrome.downloads.cancel(item.id).catch(() => {});
     await chrome.downloads.erase({ id: item.id }).catch(() => {});
-    await log(`#${item.id} handed to SwiftDL`);
+    await log(`#${item.id} handed to MotlyDL`);
     flashBadge("✓", "#2f9e6a");
   } catch (err) {
+    await markHandedBack([url, item.url, item.finalUrl]);
     await log(`#${item.id} left to the browser: ${err?.message || err}`);
     await chrome.downloads.resume(item.id).catch(() => {});
     flashBadge("!", "#dc4b4b");
@@ -137,8 +378,28 @@ function header(headers, name) {
   return headers?.find((h) => h.name.toLowerCase() === name)?.value || "";
 }
 
+async function recordMedia(tabId, url, kind, mime, size) {
+  const { [key(tabId)]: list = [] } = await chrome.storage.session.get(key(tabId));
+  if (list.some((m) => m.url === url)) return;
+  list.unshift({ url, kind, mime, size, at: Date.now() });
+  await chrome.storage.session.set({ [key(tabId)]: list.slice(0, 25) });
+  refreshBadge(tabId);
+  // Read a stream's qualities now, while the video plays, so the menu has
+  // them the moment it opens. (Our own fetch has no tab, so it isn't caught.)
+  if (kind === "hls" || kind === "dash") {
+    streamQualities(url).then(async (qualities) => {
+      if (!qualities) return;
+      const { [key(tabId)]: now = [] } = await chrome.storage.session.get(key(tabId));
+      const item = now.find((m) => m.url === url);
+      if (!item) return;
+      item.qualities = qualities;
+      await chrome.storage.session.set({ [key(tabId)]: now });
+    }).catch(() => {});
+  }
+}
+
 chrome.webRequest.onResponseStarted.addListener(
-  async (d) => {
+  (d) => {
     if (d.tabId < 0 || d.statusCode >= 400) return;
     const mime = header(d.responseHeaders, "content-type").split(";")[0].trim().toLowerCase();
     const range = header(d.responseHeaders, "content-range");
@@ -146,23 +407,7 @@ chrome.webRequest.onResponseStarted.addListener(
     const kind = classify(d.url, mime, size);
     if (!kind) return;
     const url = d.url.replace(/([?&])(range|rn|rbuf)=[^&]*/gi, "$1").replace(/[?&]$/, "");
-    const { [key(d.tabId)]: list = [] } = await chrome.storage.session.get(key(d.tabId));
-    if (list.some((m) => m.url === url)) return;
-    list.unshift({ url, kind, mime, size, at: Date.now() });
-    await chrome.storage.session.set({ [key(d.tabId)]: list.slice(0, 25) });
-    refreshBadge(d.tabId);
-    // Read a stream's qualities now, while the video plays, so the menu has
-    // them the moment it opens. (Our own fetch has no tab, so it isn't caught.)
-    if (kind === "hls" || kind === "dash") {
-      streamQualities(url).then(async (qualities) => {
-        if (!qualities) return;
-        const { [key(d.tabId)]: now = [] } = await chrome.storage.session.get(key(d.tabId));
-        const item = now.find((m) => m.url === url);
-        if (!item) return;
-        item.qualities = qualities;
-        await chrome.storage.session.set({ [key(d.tabId)]: now });
-      }).catch(() => {});
-    }
+    void recordMedia(d.tabId, url, kind, mime, size);
   },
   { urls: ["http://*/*", "https://*/*"], types: ["media", "xmlhttprequest", "other", "object"] },
   ["responseHeaders"],
@@ -287,8 +532,8 @@ chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove(key(t
 
 function createMenus() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "swiftdl-link", title: "Download with SwiftDL", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "swiftdl-media", title: "Download with SwiftDL", contexts: ["video", "audio", "image"] });
+    chrome.contextMenus.create({ id: "motlydl-link", title: "Download with MotlyDL", contexts: ["link"] });
+    chrome.contextMenus.create({ id: "motlydl-media", title: "Download with MotlyDL", contexts: ["video", "audio", "image"] });
   });
 }
 chrome.runtime.onInstalled.addListener(() => { createMenus(); ping(); });

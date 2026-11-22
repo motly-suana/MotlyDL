@@ -33,6 +33,7 @@ export interface Item {
   note: string | null;
   checksum?: string | null;
   verified?: boolean;
+  pageUrl?: string | null;
   peers?: number | null;
   seeds?: number | null;
 }
@@ -55,11 +56,15 @@ export interface Settings {
   whenDone: string;
   /** The queue is held until this time (ms since epoch); 0 = no schedule. */
   startAt: number;
+  /** Stop/pause active downloads at this time (ms since epoch); 0 = no schedule. */
+  stopAt: number;
+  /** Optional custom folder per category. */
+  categoryDirs: Record<string, string>;
   /** Proxy for downloads, like http://127.0.0.1:8080; empty follows the system's. */
   proxy: string;
   /** Send downloads out from this local address only (a VPN adapter's). */
   bindAddress: string;
-  /** Offer to download a link on the clipboard when switching to SwiftDL. */
+  /** Offer to download a link on the clipboard when switching to MotlyDL. */
   watchClipboard: boolean;
   /** Unpack finished archives beside themselves. */
   extractArchives: boolean;
@@ -85,14 +90,25 @@ export interface Incoming {
   referrer?: string | null;
   cookies?: string | null;
   userAgent?: string | null;
+  pageUrl?: string | null;
+  contentType?: string | null;
+  contentLength?: number | null;
   /** A video's qualities, read from the page by the extension. */
   qualities?: Quality[] | null;
   pick?: number | null;
 }
 
+export interface RefreshEvent {
+  itemId: number;
+  filename?: string;
+  status: "waiting" | "matched" | "mismatch";
+  pageUrl?: string;
+  error?: string;
+}
+
 export interface AppState { items: Item[]; settings: Settings; pending: Incoming[]; version: string }
 export interface UpdateInfo { version: string; page: string; asset: string | null }
-export interface ProbeInfo { filename: string; size: number | null; resumable: boolean; category: string; dir: string }
+export interface ProbeInfo { filename: string; size: number | null; resumable: boolean; category: string; dir: string; contentType?: string | null }
 export interface BrowserStatus { id: string; name: string; installed: boolean; autoOffer: boolean; lastSeen?: number | null }
 export interface IntegrationStatus { browsers: BrowserStatus[]; lastSeen: number | null; storeUrl: string; storeAvailable: boolean }
 export interface Quality { label: string; format: string; ext: string; size: number | null }
@@ -102,7 +118,7 @@ export interface TorrentInfo { name: string; size: number; files: { path: string
 export interface AddRequest {
   url: string; filename: string; dir: string; headers?: Header[]; start: boolean;
   window?: string | null; format?: string | null; size?: number | null; torrentFiles?: number[] | null;
-  checksum?: string | null;
+  checksum?: string | null; category?: string | null; contentType?: string | null; pageUrl?: string | null;
 }
 
 type Ids = { ids: number[] };
@@ -117,6 +133,8 @@ export interface Commands {
   probe_playlist: [{ url: string }, PlaylistInfo];
   add_playlist: [{ entries: { url: string; title: string }[]; mode: string }, number];
   set_url: [{ id: number; url: string }, void];
+  start_refresh: [{ id: number }, string];
+  cancel_refresh: [void, void];
   download_next: [{ id: number }, boolean];
   add_metalink: [{ url: string }, [string, number]];
   grab_page: [{ url: string }, { url: string; name: string }[]];
@@ -126,6 +144,7 @@ export interface Commands {
   probe_torrent: [{ url: string; headers: Header[] }, TorrentInfo];
   open_new_download: [{ url: string }, void];
   default_dir: [{ filename: string }, string];
+  default_dir_for_category: [{ category: string }, string];
   add_download: [{ req: AddRequest }, number];
   pause: [Ids, void];
   resume: [Ids, void];
@@ -152,6 +171,7 @@ export interface Events {
   downloads: Item[];
   settings: Settings;
   incoming: unknown;
+  "refresh-state": RefreshEvent | null;
 }
 
 // ---------- the Tauri globals (withGlobalTauri) ----------

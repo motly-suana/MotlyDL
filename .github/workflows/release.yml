@@ -40,10 +40,10 @@ jobs:
           cat >> notes.md <<'EOF'
 
           ### Install
-          - **Windows:** `SwiftDL_*_x64-setup.exe` (no admin rights needed)
-          - **macOS:** `SwiftDL_*_universal.dmg`
+          - **Windows:** `MotlyDL_*_x64-setup.exe` (no admin rights needed)
+          - **macOS:** `MotlyDL_*_universal.dmg`
           - **Linux:** `.AppImage`, `.deb` or `.rpm`
-          - **Browser extension:** included with the app. Open SwiftDL and click *Add the extension* for a short guide (Chrome, Edge, Brave, Vivaldi and Firefox). `swiftdl-extension.zip` (Chromium browsers) and `swiftdl-firefox.xpi` (Firefox) have the same files.
+          - **Browser extension:** included with the app. Open MotlyDL and click *Add the extension* for a short guide (Chrome, Edge, Brave, Vivaldi and Firefox). `motlydl-extension.zip` (Chromium browsers) and `motlydl-firefox.xpi` (Firefox) have the same files.
           EOF
       - name: Create draft release
         id: release
@@ -52,7 +52,8 @@ jobs:
         run: |
           # Take the id from the create response; listing releases right
           # after creating one can miss the new draft.
-          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases"             -f tag_name="$TAG" -f name="SwiftDL $TAG" -F draft=true -F body=@notes.md --jq .id)
+          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$TAG" -f name="MotlyDL $TAG" -F draft=true -F body=@notes.md --jq .id)
           test -n "$id"
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
@@ -135,13 +136,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          (cd extension && zip -r ../swiftdl-extension.zip .)
+          (cd extension && zip -r ../motlydl-extension.zip . -x "*.test.mjs" "*.test.js")
           # The Firefox add-on: the same files with Firefox's manifest
           # (keep in step with app/src-tauri/build.rs).
           cp -r extension firefox
-          jq 'del(.key) | .background = {scripts: ["background.js"]}
-              | .browser_specific_settings = {gecko: {id: "swiftdl@harshhh.me", strict_min_version: "140.0",
+          rm -f firefox/*.test.mjs firefox/*.test.js
+          jq 'del(.key)
+              | .permissions |= ((. // []) + ["webRequestBlocking"] | unique)
+              | .background = {scripts: ["capture.js", "background.js"]}
+              | .browser_specific_settings = {gecko: {id: "motlydl@motly-suana.github.io", strict_min_version: "140.0",
                   data_collection_permissions: {required: ["none"]}}}' \
             extension/manifest.json > firefox/manifest.json
-          (cd firefox && zip -r ../swiftdl-firefox.xpi .)
-          gh release upload "$TAG" swiftdl-extension.zip swiftdl-firefox.xpi --clobber
+          (cd firefox && zip -r ../motlydl-firefox.xpi .)
+          gh release upload "$TAG" motlydl-extension.zip motlydl-firefox.xpi --clobber

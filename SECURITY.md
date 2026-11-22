@@ -1,6 +1,6 @@
 # Security policy
 
-SwiftDL handles download links, cookies passed from your browser, and files on
+MotlyDL handles download links, cookies passed from your browser, and files on
 disk, so we take security reports seriously.
 
 ## Reporting a vulnerability

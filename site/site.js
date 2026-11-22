@@ -1,27 +1,27 @@
 // Shared by every page: release data from GitHub, OS detection, and the
 // small interactions (header border, reveal on scroll, benchmark bars).
 
-const REPO = "harshsinghsv/swiftdl";
+const REPO = "motly-suana/MotlyDL";
 const GITHUB = `https://github.com/${REPO}`;
 
 // Used when the GitHub API can't be reached (offline, rate limited), so the
 // download buttons still point at real files.
 const FALLBACK = [{
-  tag_name: "v0.2.0",
-  name: "SwiftDL 0.2.0",
-  published_at: "2026-10-30T06:30:24Z",
-  html_url: `${GITHUB}/releases/tag/v0.2.0`,
+  tag_name: "v0.4.2",
+  name: "MotlyDL 0.4.2",
+  published_at: "2026-11-22T06:30:00Z",
+  html_url: `${GITHUB}/releases/tag/v0.4.2`,
   body: "",
   assets: [
-    ["SwiftDL_0.2.0_x64-setup.exe", 2736030], ["SwiftDL_0.2.0_x64_en-US.msi", 4026368],
-    ["SwiftDL_0.2.0_universal.dmg", 6726278], ["SwiftDL_universal.app.tar.gz", 6649292],
-    ["SwiftDL_0.2.0_amd64.AppImage", 84892152], ["SwiftDL_0.2.0_amd64.deb", 4613202],
-    ["SwiftDL-0.2.0-1.x86_64.rpm", 4623331], ["swiftdl-extension.zip", 20749],
-  ].map(([name, size]) => ({ name, size, browser_download_url: `${GITHUB}/releases/download/v0.2.0/${name}` })),
+    ["MotlyDL_0.4.2_x64-setup.exe", 2736030], ["MotlyDL_0.4.2_x64_en-US.msi", 4026368],
+    ["MotlyDL_0.4.2_universal.dmg", 6726278], ["MotlyDL_universal.app.tar.gz", 6649292],
+    ["MotlyDL_0.4.2_amd64.AppImage", 84892152], ["MotlyDL_0.4.2_amd64.deb", 4613202],
+    ["MotlyDL-0.4.2-1.x86_64.rpm", 4623331], ["motlydl-extension.zip", 20749],
+  ].map(([name, size]) => ({ name, size, browser_download_url: `${GITHUB}/releases/download/v0.4.2/${name}` })),
 }];
 
 async function getReleases() {
-  const KEY = "swiftdl-releases";
+  const KEY = "motlydl-releases";
   try {
     const cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
     if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.data;

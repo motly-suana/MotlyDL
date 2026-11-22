@@ -1,8 +1,7 @@
 name: Site
 
-# Publishes site/ to GitHub Pages at https://swiftdl.harshhh.me whenever it
-# changes on main. The domain is set in the repository's Pages settings; the
-# DNS for swiftdl.harshhh.me is a CNAME to harshsinghsv.github.io.
+# Publishes site/ to GitHub Pages for motly-suana/MotlyDL whenever it
+# changes on main.
 
 on:
   push:

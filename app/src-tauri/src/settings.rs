@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -23,7 +24,7 @@ pub struct Settings {
     pub onboarding_dismissed: bool,
     /// Open a small progress window for each download as it starts.
     pub show_progress_window: bool,
-    /// Closing the main window keeps SwiftDL running in the tray.
+    /// Closing the main window keeps MotlyDL running in the tray.
     pub close_to_tray: bool,
     /// "system", "light" or "dark".
     pub theme: String,
@@ -35,12 +36,16 @@ pub struct Settings {
     pub when_done: String,
     /// Hold the queue until this time (ms since epoch). 0 = no schedule.
     pub start_at: u64,
+    /// Stop/pause running and queued downloads at this time (ms since epoch). 0 = no schedule.
+    pub stop_at: u64,
+    /// Optional custom folder per category (overrides `download_dir/<Category>`).
+    pub category_dirs: HashMap<String, PathBuf>,
     /// Proxy for downloads, e.g. "http://127.0.0.1:8080". Empty follows the
-    /// system's. Downloads use a change after SwiftDL restarts.
+    /// system's. Downloads use a change after MotlyDL restarts.
     pub proxy: String,
     /// Send downloads out from this local address only (a VPN adapter's, say).
     pub bind_address: String,
-    /// When switching to SwiftDL, offer to download a link on the clipboard.
+    /// When switching to MotlyDL, offer to download a link on the clipboard.
     pub watch_clipboard: bool,
     /// Unpack finished .zip, .tar.gz and .7z files into a folder beside them.
     pub extract_archives: bool,
@@ -81,6 +86,8 @@ impl Default for Settings {
             seed_until: "stop".into(),
             when_done: "nothing".into(),
             start_at: 0,
+            stop_at: 0,
+            category_dirs: HashMap::new(),
             proxy: String::new(),
             bind_address: String::new(),
             watch_clipboard: false,
@@ -94,5 +101,45 @@ impl Default for Settings {
             debrid_provider: "realdebrid".into(),
             debrid_token: String::new(),
         }
+    }
+}
+
+/// Loads `settings.json` from `dir`, falling back to defaults when missing or invalid.
+pub fn load_from(dir: &Path) -> Settings {
+    std::fs::read_to_string(dir.join("settings.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loads_proxy_and_bind_or_falls_back_to_defaults() {
+        let dir = std::env::temp_dir().join(format!("motlydl-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let missing = load_from(&dir);
+        assert_eq!(missing.proxy, "");
+        assert_eq!(missing.stop_at, 0);
+
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"proxy":"socks5h://127.0.0.1:1080","bindAddress":"10.0.0.2","stopAt":123456,"categoryDirs":{"Games":"/tmp/games"}}"#,
+        )
+        .unwrap();
+        let loaded = load_from(&dir);
+        assert_eq!(loaded.proxy, "socks5h://127.0.0.1:1080");
+        assert_eq!(loaded.bind_address, "10.0.0.2");
+        assert_eq!(loaded.stop_at, 123456);
+        assert_eq!(loaded.category_dirs.get("Games").map(|p| p.to_string_lossy().into_owned()).as_deref(), Some("/tmp/games"));
+
+        std::fs::write(dir.join("settings.json"), "{broken json").unwrap();
+        assert_eq!(load_from(&dir).proxy, "");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

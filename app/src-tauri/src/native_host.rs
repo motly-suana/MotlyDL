@@ -57,7 +57,7 @@ fn handle(msg: &[u8]) -> Value {
     match v["type"].as_str() {
         Some("ping") => json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }),
         Some("download") if v["url"].is_string() => match refused(&v) {
-            // The site won't give SwiftDL this file: say so, and the extension
+            // The site won't give MotlyDL this file: say so, and the extension
             // lets the browser keep (and finish) its own download.
             Some(why) => json!({ "ok": false, "error": why }),
             None => reply(launch_app(&["--add", &URL_SAFE_NO_PAD.encode(msg)])),
@@ -69,7 +69,7 @@ fn handle(msg: &[u8]) -> Value {
     }
 }
 
-/// Asks the site for the file the way SwiftDL would. Returns why not, when the
+/// Asks the site for the file the way MotlyDL would. Returns why not, when the
 /// site refuses (403, a sign-in page...): then the browser should keep the
 /// download. Network trouble and slow answers are not refusals; the app deals
 /// with those.
@@ -81,8 +81,11 @@ fn refused(v: &Value) -> Option<String> {
     }
     let headers = crate::manager::to_header_map(&inc.headers());
     let probe = async {
-        let client = swiftdl_engine::build_client().ok()?;
-        tokio::time::timeout(std::time::Duration::from_secs(8), swiftdl_engine::probe(&client, &inc.url, &headers)).await.ok()
+        // Honour the user's configured proxy and VPN bind address so refused()
+        // probes never leak the direct IP or bypass a bound interface.
+        let settings = crate::settings::load_from(&crate::browser::data_dir());
+        let client = motlydl_engine::build_client_opts(&settings.proxy, &settings.bind_address).ok()?;
+        tokio::time::timeout(std::time::Duration::from_secs(8), motlydl_engine::probe(&client, &inc.url, &headers)).await.ok()
     };
     let result = tauri::async_runtime::block_on(probe)?;
     let err = format!("{:#}", result.err()?);
@@ -323,7 +326,7 @@ mod bind_tests {
         });
         let url = format!("http://127.0.0.1:{port}/");
         let get = |bind: &str| {
-            let client = swiftdl_engine::build_client_opts("", bind).unwrap();
+            let client = motlydl_engine::build_client_opts("", bind).unwrap();
             tauri::async_runtime::block_on(async { client.get(&url).send().await.map(|r| r.status().as_u16()) })
         };
         assert_eq!(get("127.0.0.1").unwrap(), 200, "an address this PC has works");

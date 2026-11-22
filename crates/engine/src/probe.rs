@@ -13,6 +13,7 @@ pub struct RemoteFile {
     /// True when the server honours `Range` requests and reports a total size.
     pub resumable: bool,
     pub filename: String,
+    pub content_type: Option<String>,
     pub etag: Option<String>,
     pub last_modified: Option<String>,
 }
@@ -39,13 +40,24 @@ fn direct_url(url: &str) -> String {
 /// range, so we must download in a single stream.
 pub async fn probe(client: &Client, url: &str, headers: &header::HeaderMap) -> Result<RemoteFile> {
     let url = &direct_url(url);
-    let resp = client
+    let mut resp = client
         .get(url)
         .headers(headers.clone())
         .header(header::RANGE, "bytes=0-0")
         .send()
         .await
         .with_context(|| format!("could not connect to {url}"))?;
+
+    // Some servers return 416 Range Not Satisfiable on empty files or endpoints
+    // that reject Range probes; fall back once to a plain GET without Range.
+    if resp.status() == StatusCode::RANGE_NOT_SATISFIABLE {
+        resp = client
+            .get(url)
+            .headers(headers.clone())
+            .send()
+            .await
+            .with_context(|| format!("could not connect to {url}"))?;
+    }
 
     let status = resp.status();
     if !status.is_success() {
@@ -72,10 +84,16 @@ pub async fn probe(client: &Client, url: &str, headers: &header::HeaderMap) -> R
 
     // A web page where a file should be: a sign-in or "are you sure" page.
     // Saving it as the download would only leave a small broken file.
-    let ctype = header_str(h, header::CONTENT_TYPE).unwrap_or("").to_ascii_lowercase();
+    let raw_ctype = header_str(h, header::CONTENT_TYPE).unwrap_or("").to_ascii_lowercase();
+    let content_type = raw_ctype
+        .split(';')
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let attachment = header_str(h, header::CONTENT_DISPOSITION).is_some_and(|d| d.to_ascii_lowercase().contains("attachment"));
     let wants_html = [".html", ".htm", ".xhtml"].iter().any(|e| filename.to_ascii_lowercase().ends_with(e));
-    if ctype.starts_with("text/html") && !attachment && !wants_html {
+    if raw_ctype.starts_with("text/html") && !attachment && !wants_html {
         bail!("This link opens a web page, not a file. The site may need you to sign in or confirm first.");
     }
 
@@ -84,6 +102,7 @@ pub async fn probe(client: &Client, url: &str, headers: &header::HeaderMap) -> R
         size,
         resumable,
         filename,
+        content_type,
         etag: header_str(h, header::ETAG).map(str::to_string),
         last_modified: header_str(h, header::LAST_MODIFIED).map(str::to_string),
     })
@@ -117,20 +136,66 @@ fn filename_from_url(url: &reqwest::Url) -> Option<String> {
     Some(percent_decode_str(last).decode_utf8_lossy().into_owned())
 }
 
-/// Strips characters Windows forbids in file names, plus any path parts.
+/// Strips characters Windows forbids in file names, plus any path parts,
+/// prefixes Windows reserved device names, and clamps length to 200 chars.
 fn sanitize(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
-    base.chars()
+    let cleaned = base
+        .chars()
         .map(|c| if "<>:\"|?*".contains(c) || c.is_control() { '_' } else { c })
         .collect::<String>()
         .trim()
         .trim_end_matches('.')
-        .to_string()
+        .to_string();
+    if cleaned.is_empty() {
+        return cleaned;
+    }
+    let stem = cleaned.split('.').next().unwrap_or(&cleaned);
+    let reserved = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    let mut out = if reserved { format!("_{cleaned}") } else { cleaned };
+    if out.chars().count() > 200 {
+        if let Some((s, ext)) = out.rsplit_once('.')
+            && !ext.is_empty()
+            && ext.chars().count() <= 16
+        {
+            let keep = 200usize.saturating_sub(ext.chars().count() + 1);
+            let short: String = s.chars().take(keep).collect();
+            out = format!("{short}.{ext}");
+        } else {
+            out = out.chars().take(200).collect();
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
 
     #[test]
     fn drive_links_go_to_the_file() {
@@ -156,5 +221,35 @@ mod tests {
     fn sanitizes() {
         assert_eq!(sanitize("../evil/na:me?.txt"), "na_me_.txt");
         assert_eq!(sanitize("trailing..."), "trailing");
+        assert_eq!(sanitize("CON.txt"), "_CON.txt");
+        assert_eq!(sanitize("nul"), "_nul");
+        assert_eq!(sanitize("COM1.iso"), "_COM1.iso");
+        let long = format!("{}.zip", "a".repeat(250));
+        let clean = sanitize(&long);
+        assert!(clean.chars().count() <= 200 && clean.ends_with(".zip"));
+    }
+
+    #[tokio::test]
+    async fn falls_back_when_server_returns_416() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut s in listener.incoming().flatten() {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+                if head.contains("range:") {
+                    let _ = s.write_all(b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                } else {
+                    let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/zip; charset=utf-8\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata");
+                }
+            }
+        });
+        let client = crate::build_client().unwrap();
+        let rf = probe(&client, &format!("http://127.0.0.1:{port}/archive.bin"), &header::HeaderMap::new()).await.unwrap();
+        assert!(!rf.resumable);
+        assert_eq!(rf.size, Some(4));
+        assert_eq!(rf.content_type.as_deref(), Some("application/zip"));
+        assert_eq!(rf.filename, "archive.bin");
     }
 }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use suppaftp::{FtpStream, types::FileType};
-use swiftdl_engine::{CancellationToken, Outcome, Progress};
+use motlydl_engine::{CancellationToken, Outcome, Progress};
 
 pub fn is_ftp(url: &str) -> bool {
     url.len() > 6 && url[..6].eq_ignore_ascii_case("ftp://")
@@ -35,7 +35,7 @@ fn parse(url: &str) -> Result<Target> {
     Ok(Target {
         addr: format!("{host}:{}", u.port().unwrap_or(21)),
         user: if u.username().is_empty() { "anonymous".into() } else { decode(u.username()) },
-        pass: u.password().map(decode).unwrap_or_else(|| "swiftdl@".into()),
+        pass: u.password().map(decode).unwrap_or_else(|| "motlydl@".into()),
         path,
         name,
     })
@@ -67,7 +67,7 @@ pub async fn run(url: String, dest: PathBuf, progress: Arc<Progress>, cancel: Ca
 }
 
 fn part_of(dest: &Path) -> PathBuf {
-    swiftdl_engine::part_path(dest)
+    motlydl_engine::part_path(dest)
 }
 
 fn download(url: &str, dest: &Path, progress: &Progress, cancel: &CancellationToken) -> Result<Outcome> {
@@ -134,12 +134,12 @@ mod tests {
         assert!(parse("ftp://files.example.com/").is_err(), "a folder isn't a file");
     }
 
-    /// `SWIFTDL_FTP_URL=ftp://... SWIFTDL_FTP_OUT=... cargo test live_ftp -- --ignored --nocapture`
+    /// `MOTLYDL_FTP_URL=ftp://... MOTLYDL_FTP_OUT=... cargo test live_ftp -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn live_ftp() {
-        let url = std::env::var("SWIFTDL_FTP_URL").unwrap();
-        let out = PathBuf::from(std::env::var("SWIFTDL_FTP_OUT").unwrap());
+        let url = std::env::var("MOTLYDL_FTP_URL").unwrap();
+        let out = PathBuf::from(std::env::var("MOTLYDL_FTP_OUT").unwrap());
         println!("probe: {:?}", probe(&url).unwrap());
         let progress = Arc::new(Progress::default());
         // Stop after a moment, then carry on: proves resuming.

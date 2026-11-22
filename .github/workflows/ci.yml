@@ -27,7 +27,7 @@ jobs:
         working-directory: app
         run: npm ci && npm run build
       - run: cargo test --workspace
-      - run: cargo build -p swiftdl-app
+      - run: cargo build -p motlydl-app
 
   # The app has macOS-only code (opening magnet links and .torrent files);
   # make sure it compiles there too.
@@ -47,4 +47,4 @@ jobs:
       - name: Build the interface
         working-directory: app
         run: npm ci && npm run build
-      - run: cargo check -p swiftdl-app
+      - run: cargo check -p motlydl-app

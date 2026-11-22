@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SwiftDL</title>
+  <title>MotlyDL</title>
 </head>
 <body>
   <div class="app">
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="side-top" data-tauri-drag-region>
-        <div class="brand" data-tauri-drag-region><img src="logo.svg" alt="" width="20" height="20"><span>SwiftDL</span></div>
+        <div class="brand" data-tauri-drag-region><img src="logo.svg" alt="" width="20" height="20"><span>MotlyDL</span></div>
         <button class="sq-btn" id="btn-palette" title="Search and commands (Ctrl K)"><i data-icon="search"></i></button>
         <button class="sq-btn bordered" id="btn-add" title="New download (Ctrl N)"><i data-icon="compose"></i></button>
       </div>
@@ -62,7 +62,7 @@
   </div>
 
   <div class="toasts" id="toasts"></div>
-  <div class="drop" id="drop" hidden><div class="drop-card"><i data-icon="download"></i><b>Drop to download</b><span>SwiftDL will fetch the file's details first</span></div></div>
+  <div class="drop" id="drop" hidden><div class="drop-card"><i data-icon="download"></i><b>Drop to download</b><span>MotlyDL will fetch the file's details first</span></div></div>
 
   <!-- Command palette -->
   <dialog id="dlg-palette" class="modal palette">
@@ -75,7 +75,7 @@
   <dialog id="dlg-add" class="modal composer">
     <form method="dialog" id="form-add">
       <div class="comp-top">
-        <span class="crumb"><img src="logo.svg" alt="" width="14" height="14">SwiftDL</span><i data-icon="chevron" class="crumb-sep"></i><span class="crumb-cur">New download</span>
+        <span class="crumb"><img src="logo.svg" alt="" width="14" height="14">MotlyDL</span><i data-icon="chevron" class="crumb-sep"></i><span class="crumb-cur">New download</span>
         <span class="grow"></span>
         <button type="button" class="sq-btn" id="add-x" title="Close (Esc)"><i data-icon="x"></i></button>
       </div>
@@ -85,6 +85,13 @@
         <div class="cf-body">
           <input id="add-filename" class="cf-name" spellcheck="false" aria-label="File name">
           <div class="cf-sub" id="add-sub"></div>
+        </div>
+      </div>
+      <div class="comp-sum" id="add-sum-row" hidden>
+        <label class="comp-sum-lbl" for="add-sum">Checksum</label>
+        <div class="comp-sum-wrap">
+          <input id="add-sum" spellcheck="false" autocorrect="off" autocapitalize="none" placeholder="Optional: MD5, SHA-1, SHA-256, or SHA-512" aria-invalid="false">
+          <div class="field-err" id="add-sum-err" hidden></div>
         </div>
       </div>
       <div class="comp-state" id="add-state"></div>
@@ -103,16 +110,19 @@
   <dialog id="dlg-grab" class="modal composer grab">
     <form method="dialog" id="form-grab">
       <div class="comp-top">
-        <span class="crumb"><img src="logo.svg" alt="" width="14" height="14">SwiftDL</span><i data-icon="chevron" class="crumb-sep"></i><span class="crumb-cur">Find files on a page</span>
+        <span class="crumb"><img src="logo.svg" alt="" width="14" height="14">MotlyDL</span><i data-icon="chevron" class="crumb-sep"></i><span class="crumb-cur">Find files on a page</span>
         <span class="grow"></span>
         <button type="button" class="sq-btn" id="grab-x" title="Close (Esc)"><i data-icon="x"></i></button>
       </div>
       <input id="grab-url" class="comp-url" type="url" placeholder="Paste a page address…" autocomplete="off" spellcheck="false">
+      <search class="grab-search"><input id="grab-q" type="search" placeholder="Filter by extension or pattern (e.g. .pdf, *.zip, ubuntu)…" autocomplete="off" spellcheck="false" aria-label="Filter links"></search>
       <div class="comp-state" id="grab-state"></div>
       <div class="chips" id="grab-chips"></div>
+      <div class="chips grab-exts" id="grab-exts"></div>
       <div class="grab-list" id="grab-list"></div>
       <div class="comp-foot">
         <button type="button" class="ghost-btn" id="grab-all">Select all</button>
+        <button type="button" class="ghost-btn" id="grab-invert">Invert</button>
         <span class="grow"></span>
         <button type="button" class="btn primary" id="grab-go" disabled>Download</button>
       </div>
@@ -121,7 +131,7 @@
   <dialog id="dlg-playlist" class="modal composer grab">
     <form method="dialog" id="form-playlist">
       <div class="comp-top">
-        <span class="crumb"><img src="logo.svg" alt="" width="14" height="14">SwiftDL</span><i data-icon="chevron" class="crumb-sep"></i><span class="crumb-cur">Playlist</span>
+        <span class="crumb"><img src="logo.svg" alt="" width="14" height="14">MotlyDL</span><i data-icon="chevron" class="crumb-sep"></i><span class="crumb-cur">Playlist</span>
         <span class="grow"></span>
         <button type="button" class="sq-btn" id="pl-x" title="Close (Esc)"><i data-icon="x"></i></button>
       </div>
@@ -156,14 +166,20 @@
           </div>
           <div class="set-group">
             <div class="set-row"><div class="sr-text"><b>Download folder</b><span id="set-dir"></span></div><button type="button" class="btn sm" id="set-browse">Change…</button></div>
-            <label class="set-row"><div class="sr-text"><b>Sort by file type</b><span>Save videos, music, programs and archives into their own folders</span></div><span class="switch"><input type="checkbox" id="set-sort"><i></i></span></label>
+            <label class="set-row"><div class="sr-text"><b>Sort by file type</b><span>Save games, videos, music, programs and archives into their own folders</span></div><span class="switch"><input type="checkbox" id="set-sort"><i></i></span></label>
+            <div class="set-row col cat-dirs-row">
+              <details class="manual cat-dirs" id="set-cat-details">
+                <summary>Custom folder per category</summary>
+                <div id="set-cat-dirs"></div>
+              </details>
+            </div>
           </div>
           <div class="set-group">
             <label class="set-row"><div class="sr-text"><b>Confirm browser downloads</b><span>Show New download before a download from the browser starts</span></div><span class="switch"><input type="checkbox" id="set-ask"><i></i></span></label>
             <div class="set-row col"><div class="sr-text"><b>Video links</b><span>What to do when you download a video. Skip the window to start right away.</span></div>
               <div class="seg" id="set-videodef"><button type="button" data-v="ask">Ask each time</button><button type="button" data-v="high">Up to 1080p</button><button type="button" data-v="best">Best available</button><button type="button" data-v="audio">Audio only</button></div></div>
             <label class="set-row"><div class="sr-text"><b>Notifications</b><span>Notify me when a download finishes</span></div><span class="switch"><input type="checkbox" id="set-notify"><i></i></span></label>
-            <label class="set-row"><div class="sr-text"><b>Watch the clipboard</b><span>When you switch to SwiftDL after copying a download link, offer to download it</span></div><span class="switch"><input type="checkbox" id="set-clip"><i></i></span></label>
+            <label class="set-row"><div class="sr-text"><b>Watch the clipboard</b><span>When you switch to MotlyDL after copying a download link, offer to download it</span></div><span class="switch"><input type="checkbox" id="set-clip"><i></i></span></label>
             <label class="set-row"><div class="sr-text"><b>Unpack archives</b><span>When a .zip, .tar.gz or .7z finishes, unpack it into a folder beside it</span></div><span class="switch"><input type="checkbox" id="set-extract"><i></i></span></label>
           </div>
           <div class="set-group">
@@ -188,41 +204,43 @@
             </div>
           </div>
           <div class="set-group">
-            <div class="set-row"><div class="sr-text"><b>Proxy</b><span>Like http://127.0.0.1:8080 or socks5://127.0.0.1:1080. Empty follows your system. Restart SwiftDL to apply.</span></div><input id="set-proxy" class="txt" placeholder="None" spellcheck="false" autocomplete="off"></div>
+            <div class="set-row"><div class="sr-text"><b>Proxy</b><span>Like http://127.0.0.1:8080 or socks5://127.0.0.1:1080. Empty follows your system. Restart MotlyDL to apply.</span></div><input id="set-proxy" class="txt" placeholder="None" spellcheck="false" autocomplete="off"></div>
             <div class="set-row"><div class="sr-text"><b>Debrid service</b><span>Links from file-hosting sites the service supports download through your account there.</span></div>
               <div class="seg" id="set-debrid-provider"><button type="button" data-v="realdebrid">Real-Debrid</button><button type="button" data-v="alldebrid">AllDebrid</button><button type="button" data-v="premiumize">Premiumize</button></div></div>
             <div class="set-row"><div class="sr-text"><b>Debrid API token</b><span>From the service's account page: real-debrid.com/apitoken, alldebrid.com/apikeys or premiumize.me/account.</span></div><input id="set-debrid" class="txt" type="password" placeholder="Not used" spellcheck="false" autocomplete="off"></div>
-            <div class="set-row"><div class="sr-text"><b>Network address</b><span>Send downloads out only from this address, such as your VPN's. If it goes away, downloads stop instead of using another route. Restart SwiftDL to apply.</span></div><input id="set-bind" class="txt" placeholder="Any" spellcheck="false" autocomplete="off"></div>
+            <div class="set-row"><div class="sr-text"><b>Network address</b><span>Send downloads out only from this address, such as your VPN's. If it goes away, downloads stop instead of using another route. Restart MotlyDL to apply.</span></div><input id="set-bind" class="txt" placeholder="Any" spellcheck="false" autocomplete="off"></div>
           </div>
           <h2>Local API</h2>
           <div class="set-group">
-            <label class="set-row"><div class="sr-text"><b>aria2-compatible API</b><span>Lets tools like AriaNg and scripts control SwiftDL. Local only, and every call needs the secret. Restart SwiftDL to apply.</span></div><span class="switch"><input type="checkbox" id="set-api"><i></i></span></label>
+            <label class="set-row"><div class="sr-text"><b>aria2-compatible API</b><span>Lets tools like AriaNg and scripts control MotlyDL. Local only, and every call needs the secret. Restart MotlyDL to apply.</span></div><span class="switch"><input type="checkbox" id="set-api"><i></i></span></label>
             <div class="set-row"><div class="sr-text"><b>Port</b><span id="set-api-hint">Open http://127.0.0.1:6800 for the web remote</span></div><input id="set-api-port" class="txt" type="number" min="1024" max="65535" placeholder="6800"></div>
             <div class="set-row"><div class="sr-text"><b>Secret</b><span>Used as token:SECRET in each call</span></div><input id="set-api-secret" class="txt" spellcheck="false" autocomplete="off" placeholder="Made when you turn it on"></div>
-            <label class="set-row"><div class="sr-text"><b>Allow other devices on my network</b><span>For a phone. Anyone on your Wi-Fi who knows the secret could control SwiftDL, and the connection isn't encrypted, so only use a network you trust. Needs a secret of 12 or more characters.</span></div><span class="switch"><input type="checkbox" id="set-api-lan"><i></i></span></label>
+            <label class="set-row"><div class="sr-text"><b>Allow other devices on my network</b><span>For a phone. Anyone on your Wi-Fi who knows the secret could control MotlyDL, and the connection isn't encrypted, so only use a network you trust. Needs a secret of 12 or more characters.</span></div><span class="switch"><input type="checkbox" id="set-api-lan"><i></i></span></label>
           </div>
           <h2>Automation</h2>
           <div class="set-group">
             <div class="set-row col"><div class="sr-text"><b>When all downloads finish</b><span>Happens once, then goes back to doing nothing</span></div>
-              <div class="seg" id="set-whendone"><button type="button" data-v="nothing">Nothing</button><button type="button" data-v="close">Quit SwiftDL</button><button type="button" data-v="sleep">Sleep</button><button type="button" data-v="shutdown">Shut down</button></div></div>
+              <div class="seg" id="set-whendone"><button type="button" data-v="nothing">Nothing</button><button type="button" data-v="close">Quit MotlyDL</button><button type="button" data-v="sleep">Sleep</button><button type="button" data-v="shutdown">Shut down</button></div></div>
             <div class="set-row"><div class="sr-text"><b>Start the queue at</b><span id="set-startat-hint">Downloads wait until this time, once</span></div>
               <span class="custom"><input id="set-startat" type="time"> <button type="button" class="btn sm" id="set-startat-clear">Clear</button></span></div>
+            <div class="set-row"><div class="sr-text"><b>Stop the queue at</b><span id="set-stopat-hint">Running downloads pause at this time, once</span></div>
+              <span class="custom"><input id="set-stopat" type="time"> <button type="button" class="btn sm" id="set-stopat-clear">Clear</button></span></div>
           </div>
         </section>
         <section data-panel="browser" hidden>
           <h2>Browser extension</h2>
-          <p class="lead">The extension sends browser downloads to SwiftDL, with your cookies so downloads behind a login work, and adds a download button to videos.</p>
+          <p class="lead">The extension sends browser downloads to MotlyDL, with your cookies so downloads behind a login work, and adds a download button to videos.</p>
           <div class="ext-status" id="ext-status"></div>
           <div class="set-group" id="browser-list"></div>
-          <p class="set-note" id="ext-saveas" hidden>Browser still asks where to save? Turn off <b>Ask where to save each file before downloading</b> in its download settings, so only SwiftDL asks.</p>
+          <p class="set-note" id="ext-saveas" hidden>Browser still asks where to save? Turn off <b>Ask where to save each file before downloading</b> in its download settings, so only MotlyDL asks.</p>
           <div class="set-group">
             <label class="set-row"><div class="sr-text"><b>Offer the extension automatically</b><span>Supported browsers ask once, the next time they start</span></div><span class="switch"><input type="checkbox" id="set-offer"><i></i></span></label>
           </div>
         </section>
         <section data-panel="about" hidden>
-          <div class="about"><img src="logo.svg" alt="" width="64" height="64"><h2>SwiftDL</h2><p id="version"></p><p class="muted">Fast, resumable downloads with many connections at once.<br>Free and open source.</p></div>
+          <div class="about"><img src="logo.svg" alt="" width="64" height="64"><h2>MotlyDL</h2><p id="version"></p><p class="muted">Fast, resumable downloads with many connections at once.<br>Free and open source.</p></div>
           <div class="set-group">
-            <div class="set-row"><div class="sr-text"><b>Debug log</b><span>What SwiftDL did and any errors. Attach it when you report a bug.</span></div><button type="button" class="btn sm" id="set-log">Open log</button></div>
+            <div class="set-row"><div class="sr-text"><b>Debug log</b><span>What MotlyDL did and any errors. Attach it when you report a bug.</span></div><button type="button" class="btn sm" id="set-log">Open log</button></div>
           </div>
         </section>
         <div class="set-foot">
@@ -234,20 +252,20 @@
   </dialog>
 
   <!-- Confirm -->
-  <!-- Install the extension from the folder SwiftDL ships with -->
+  <!-- Install the extension from the folder MotlyDL ships with -->
   <dialog id="dlg-ext" class="modal guide">
     <form method="dialog">
       <h3>Add the browser extension</h3>
-      <p class="muted">The extension came with SwiftDL. Add it in four steps; this window notices as soon as it connects.</p>
+      <p class="muted">The extension came with MotlyDL. Add it in four steps; this window notices as soon as it connects.</p>
       <ol class="guide-steps">
         <li><span class="step">1</span><div><b>Open the extensions page</b><span id="ext-step1">Type <code>chrome://extensions</code> in the address bar</span><span class="guide-browsers" id="ext-browsers"></span></div></li>
         <li><span class="step">2</span><div><b>Turn on Developer mode</b><span>The switch is in the top-right corner of that page</span></div></li>
         <li><span class="step">3</span><div><b>Click Load unpacked</b><span>A folder picker opens</span></div></li>
-        <li><span class="step">4</span><div><b>Choose SwiftDL's extension folder</b><span>The path is already copied, so paste it into the picker</span><span class="guide-path"><code id="ext-path">…</code><button type="button" class="sq-btn" id="ext-copy" title="Copy path"></button></span></div></li>
+        <li><span class="step">4</span><div><b>Choose MotlyDL's extension folder</b><span>The path is already copied, so paste it into the picker</span><span class="guide-path"><code id="ext-path">…</code><button type="button" class="sq-btn" id="ext-copy" title="Copy path"></button></span></div></li>
       </ol>
       <p class="guide-wait" id="ext-wait">Waiting for the extension to connect…</p>
-      <p class="guide-note">Use this folder rather than a downloaded copy: it stays in place while SwiftDL is installed and is refreshed when SwiftDL updates.</p>
-      <p class="guide-note"><b>Seeing two download windows?</b> Turn off “Ask where to save each file before downloading” in your browser's download settings. The browser asks before SwiftDL can take over.</p>
+      <p class="guide-note">Use this folder rather than a downloaded copy: it stays in place while MotlyDL is installed and is refreshed when MotlyDL updates.</p>
+      <p class="guide-note"><b>Seeing two download windows?</b> Turn off “Ask where to save each file before downloading” in your browser's download settings. The browser asks before MotlyDL can take over.</p>
       <p class="guide-note"><b>Firefox:</b> get it from <a href="#" id="ext-ff-store">Firefox Add-ons</a> instead.</p>
       <div class="confirm-foot">
         <button value="close" class="btn">Done</button>

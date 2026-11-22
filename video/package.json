@@ -1,8 +1,8 @@
 {
-  "name": "swiftdl-launch-video",
+  "name": "motlydl-launch-video",
   "private": true,
   "type": "module",
-  "description": "SwiftDL's launch video: an HTML timeline rendered frame by frame to MP4.",
+  "description": "MotlyDL's launch video: an HTML timeline rendered frame by frame to MP4.",
   "scripts": {
     "render": "node render.mjs",
     "still": "node render.mjs --still"

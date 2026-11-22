@@ -1,47 +1,79 @@
 // Release builds are GUI apps: no console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod browser;
-mod commands;
-mod manager;
-mod log;
-mod media;
-mod native_host;
-mod settings;
-mod torrent;
 mod batch;
+mod browser;
+mod checksum;
+mod commands;
 mod debrid;
 mod extract;
 mod ftp;
-mod rpc;
 mod grabber;
+mod log;
+mod manager;
+mod media;
 mod metalink;
+mod native_host;
+mod rpc;
+mod settings;
 mod stream;
+mod torrent;
 mod update;
 mod windows;
 
 use manager::DownloadManager;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
+
+static MAIN_CREATING: AtomicBool = AtomicBool::new(false);
+
+struct ClearFlag(&'static AtomicBool);
+
+impl Drop for ClearFlag {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
 
 pub fn show_main_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
+        return;
     }
+    let Some(mut cfg) = app.config().app.windows.first().cloned() else {
+        return;
+    };
+    if MAIN_CREATING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        return;
+    }
+    cfg.visible = true;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _guard = ClearFlag(&MAIN_CREATING);
+        match tauri::WebviewWindowBuilder::from_config(&app, &cfg).and_then(|b| b.build()) {
+            Ok(w) => {
+                windows::polish(&w);
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            Err(e) => crate::log::line(&format!("could not open main window: {e:#}")),
+        }
+    });
 }
 
-/// SwiftDL lives in the tray like IDM: closing the main window keeps
+/// MotlyDL lives in the tray like IDM: closing the main window keeps
 /// downloads (and browser integration) running.
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open SwiftDL", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit SwiftDL", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open MotlyDL", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit MotlyDL", true, None::<&str>)?;
     let nolimit = tauri::menu::CheckMenuItem::with_id(app, "nolimit", "Ignore speed limit", true, false, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &nolimit, &PredefinedMenuItem::separator(app)?, &quit])?;
-    let mut tray = TrayIconBuilder::with_id("main").tooltip("SwiftDL").menu(&menu).show_menu_on_left_click(false);
+    let mut tray = TrayIconBuilder::with_id("main").tooltip("MotlyDL").menu(&menu).show_menu_on_left_click(false);
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
@@ -89,7 +121,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
-            log::line(&format!("SwiftDL {} starting on {} {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH));
+            log::line(&format!("MotlyDL {} starting on {} {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH));
             let data_dir = app.path().app_data_dir()?;
             let downloads = app.path().download_dir().unwrap_or_else(|_| data_dir.join("Downloads"));
             let mgr = DownloadManager::new(app.handle().clone(), data_dir.clone(), downloads)?;
@@ -146,6 +178,8 @@ fn main() {
             commands::probe_playlist,
             commands::add_playlist,
             commands::set_url,
+            commands::start_refresh,
+            commands::cancel_refresh,
             commands::grab_page,
             commands::add_metalink,
             commands::download_next,
@@ -155,6 +189,7 @@ fn main() {
             commands::probe_torrent,
             commands::open_new_download,
             commands::default_dir,
+            commands::default_dir_for_category,
             commands::add_download,
             commands::pause,
             commands::resume,
@@ -178,35 +213,48 @@ fn main() {
             commands::install_update,
         ])
         .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
-                let mgr = window.app_handle().state::<Arc<DownloadManager>>();
-                mgr.save();
-                if mgr.settings().close_to_tray {
-                    api.prevent_close();
-                    let _ = window.hide();
+            tauri::WindowEvent::CloseRequested { .. } if window.label() == "main" => {
+                // Allow the main WebView to close and release its renderer/GPU memory;
+                // `RunEvent::ExitRequested` keeps the tray process alive when `close_to_tray` is on.
+                if let Some(mgr) = window.app_handle().try_state::<Arc<DownloadManager>>() {
+                    mgr.save();
+                }
+            }
+            tauri::WindowEvent::Destroyed => {
+                if let Some(mgr) = window.app_handle().try_state::<Arc<DownloadManager>>() {
+                    mgr.on_window_destroyed(window.label());
                 }
             }
             _ => {}
         })
         .build(tauri::generate_context!())
-        .expect("error while starting SwiftDL")
-        .run(|_app, _event| {
+        .expect("error while starting MotlyDL")
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                if code.is_none()
+                    && (MAIN_CREATING.load(Ordering::Acquire)
+                        || app.try_state::<Arc<DownloadManager>>().is_some_and(|m| m.settings().close_to_tray))
+                {
+                    api.prevent_exit();
+                }
+            }
             // macOS hands over magnet links and .torrent files as an event,
             // not as arguments.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = _event {
+            tauri::RunEvent::Opened { urls } => {
                 for url in urls {
                     let link = if url.scheme() == "file" {
                         url.to_file_path().ok().map(|p| p.to_string_lossy().into_owned())
                     } else {
                         Some(url.to_string())
                     };
-                    if let (Some(link), Some(mgr)) = (link, _app.try_state::<Arc<DownloadManager>>()) {
+                    if let (Some(link), Some(mgr)) = (link, app.try_state::<Arc<DownloadManager>>()) {
                         if torrent::is_torrent(&link, None) {
-                            mgr.incoming(manager::Incoming { url: link, filename: None, referrer: None, cookies: None, user_agent: None, qualities: None, pick: None });
+                            mgr.incoming(manager::Incoming { url: link, ..Default::default() });
                         }
                     }
                 }
             }
+            _ => {}
         });
 }

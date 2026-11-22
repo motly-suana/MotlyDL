@@ -1,7 +1,7 @@
 //! Video sites (YouTube and others), through yt-dlp.
 //!
 //! These sites don't serve a plain file. YouTube's player streams through a
-//! private protocol with no download address, so SwiftDL hands these pages
+//! private protocol with no download address, so MotlyDL hands these pages
 //! to yt-dlp, which keeps up with such changes, and to ffmpeg, which joins
 //! the separate video and audio streams. Both are fetched into the app's
 //! data folder the first time they're needed, and yt-dlp is kept current.
@@ -15,7 +15,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime};
-use swiftdl_engine::{CancellationToken, Client, Outcome, Progress};
+use motlydl_engine::{CancellationToken, Client, Outcome, Progress};
 
 /// Sites sent to yt-dlp instead of the regular engine.
 const SITES: &[&str] = &[
@@ -42,7 +42,7 @@ pub fn is_media_url(url: &str) -> bool {
 }
 
 /// Spotify's music is copy-protected, so no downloader can save it.
-pub const SPOTIFY_MSG: &str = "Spotify's music is copy-protected, so SwiftDL can't download it.";
+pub const SPOTIFY_MSG: &str = "Spotify's music is copy-protected, so MotlyDL can't download it.";
 
 pub fn is_spotify(url: &str) -> bool {
     url::Url::parse(url).ok().and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase())).is_some_and(|h| h == "spotify.com" || h.ends_with(".spotify.com"))
@@ -93,7 +93,7 @@ fn parse_playlist(v: &Value) -> Result<Playlist> {
         .take(500)
         .collect();
     if entries.is_empty() {
-        bail!("that playlist has no videos SwiftDL can download");
+        bail!("that playlist has no videos MotlyDL can download");
     }
     Ok(Playlist { title: v["title"].as_str().unwrap_or("Playlist").to_string(), entries })
 }
@@ -214,12 +214,12 @@ async fn ensure_tools(client: &Client, note: &Note, need_ffmpeg: bool) -> Result
     Ok(Tools { ytdlp, ffmpeg: ffmpeg_dir() })
 }
 
-/// Downloads `url` to `dest` with SwiftDL's own engine: many connections at
+/// Downloads `url` to `dest` with MotlyDL's own engine: many connections at
 /// once, and resumable if the app is closed halfway. A single connection to
 /// GitHub can crawl along at a few KB/s; ffmpeg alone is over 100 MB.
 async fn fetch(client: &Client, url: &str, dest: &Path, note: &Note, label: &str) -> Result<()> {
     set_note(note, label);
-    let req = swiftdl_engine::Request {
+    let req = motlydl_engine::Request {
         url: url.to_string(),
         dest: dest.to_path_buf(),
         connections: 8,
@@ -240,8 +240,8 @@ async fn fetch(client: &Client, url: &str, dest: &Path, note: &Note, label: &str
             }
         })
     };
-    let limiter = Arc::new(swiftdl_engine::SpeedLimiter::new(0));
-    let done = swiftdl_engine::run(client, &req, progress, CancellationToken::new(), limiter).await;
+    let limiter = Arc::new(motlydl_engine::SpeedLimiter::new(0));
+    let done = motlydl_engine::run(client, &req, progress, CancellationToken::new(), limiter).await;
     ticker.abort();
     match done? {
         Outcome::Completed => Ok(()),
@@ -494,7 +494,7 @@ async fn ytdlp_run(ytdlp: PathBuf, url: String, headers: Vec<(String, String)>, 
 // ---------- YouTube: look the video up before the download is started ----------
 //
 // Most of the wait before a YouTube download is yt-dlp unscrambling the
-// video's addresses. SwiftDL starts that the moment the quality menu opens
+// video's addresses. MotlyDL starts that the moment the quality menu opens
 // and saves the answer; the download then hands it to yt-dlp
 // (--load-info-json) and starts right away.
 
@@ -662,12 +662,12 @@ fn last_error(stderr: &str) -> Option<String> {
     // A stream address the site no longer serves: links like these expire, or
     // work once, and "generic" is yt-dlp's name for a plain address.
     if e.contains("[generic]") && (e.contains("HTTP Error 404") || e.contains("HTTP Error 403") || e.contains("HTTP Error 410")) {
-        return Some("The site no longer gives out this stream link. Such links can expire or work only once: play the video again in the browser, then use SwiftDL on it.".into());
+        return Some("The site no longer gives out this stream link. Such links can expire or work only once: play the video again in the browser, then use MotlyDL on it.".into());
     }
     // yt-dlp's advice names its own flags, which mean nothing here.
     let lower = e.to_lowercase();
     if lower.contains("--cookies") || lower.contains("logged-in") || lower.contains("authentication is required") || lower.contains("login required") {
-        return Some("This site needs you to be signed in. Download it with the SwiftDL extension in a browser where you're signed in, so your session is passed on.".into());
+        return Some("This site needs you to be signed in. Download it with the MotlyDL extension in a browser where you're signed in, so your session is passed on.".into());
     }
     Some(e)
 }
@@ -765,7 +765,7 @@ fn choose<'a>(info: &'a Value, format: &str) -> Option<(Option<&'a Value>, Optio
 /// speed of 8 in testing, and 32 was no faster than 16.
 const YOUTUBE_CONNECTIONS: usize = 16;
 
-/// Downloads a YouTube video straight from its saved lookup with SwiftDL's
+/// Downloads a YouTube video straight from its saved lookup with MotlyDL's
 /// engine. `None` when there is no lookup or nothing in it fits, so yt-dlp
 /// should do it instead.
 async fn direct(client: &Client, job: &Job, progress: &Arc<Progress>, note: &Note, cancel: &CancellationToken) -> Result<Option<Outcome>> {
@@ -804,18 +804,18 @@ async fn direct(client: &Client, job: &Job, progress: &Arc<Progress>, note: &Not
             }
         })
     };
-    let limiter = Arc::new(swiftdl_engine::SpeedLimiter::new(0));
+    let limiter = Arc::new(motlydl_engine::SpeedLimiter::new(0));
     let started = std::time::Instant::now();
     let runs = parts.iter().zip(&each).map(|((f, path), p)| {
-        let mut headers = swiftdl_engine::header::HeaderMap::new();
+        let mut headers = motlydl_engine::header::HeaderMap::new();
         for (k, v) in f["http_headers"].as_object().into_iter().flatten() {
-            if let (Ok(k), Some(Ok(v))) = (k.parse::<swiftdl_engine::header::HeaderName>(), v.as_str().map(|v| v.parse())) {
+            if let (Ok(k), Some(Ok(v))) = (k.parse::<motlydl_engine::header::HeaderName>(), v.as_str().map(|v| v.parse())) {
                 headers.insert(k, v);
             }
         }
-        let req = swiftdl_engine::Request { url: f["url"].as_str().unwrap_or_default().to_string(), dest: path.clone(), connections: YOUTUBE_CONNECTIONS, headers, restart: false, mirrors: vec![] };
+        let req = motlydl_engine::Request { url: f["url"].as_str().unwrap_or_default().to_string(), dest: path.clone(), connections: YOUTUBE_CONNECTIONS, headers, restart: false, mirrors: vec![] };
         let (p, cancel, limiter) = (p.clone(), cancel.clone(), limiter.clone());
-        async move { swiftdl_engine::run(client, &req, p, cancel, limiter).await }
+        async move { motlydl_engine::run(client, &req, p, cancel, limiter).await }
     });
     let results = futures_util::future::join_all(runs).await;
     ticker.abort();
@@ -1123,14 +1123,14 @@ mod tests {
 #[cfg(test)]
 mod live {
     /// `cargo test --release live_youtube -- --ignored --nocapture` with
-    /// SWIFTDL_YT_URL and SWIFTDL_YT_OUT set. Downloads 1080p for real.
-    /// Runs the same lookup the app does, for any URL in SWIFTDL_PROBE_URL.
-    /// SWIFTDL_PL_URL=https://www.youtube.com/playlist?list=... cargo test live_playlist -- --ignored --nocapture
+    /// MOTLYDL_YT_URL and MOTLYDL_YT_OUT set. Downloads 1080p for real.
+    /// Runs the same lookup the app does, for any URL in MOTLYDL_PROBE_URL.
+    /// MOTLYDL_PL_URL=https://www.youtube.com/playlist?list=... cargo test live_playlist -- --ignored --nocapture
     #[test]
     #[ignore]
     fn live_playlist() {
-        let url = std::env::var("SWIFTDL_PL_URL").unwrap();
-        let client = swiftdl_engine::build_client().unwrap();
+        let url = std::env::var("MOTLYDL_PL_URL").unwrap();
+        let client = motlydl_engine::build_client().unwrap();
         let t = std::time::Instant::now();
         let p = tauri::async_runtime::block_on(super::playlist(&client, &url, vec![])).unwrap();
         println!("PLAYLIST {:?}: {} videos in {:.1}s; first: {:?}", p.title, p.entries.len(), t.elapsed().as_secs_f64(), p.entries.first());
@@ -1139,7 +1139,7 @@ mod live {
     #[test]
     #[ignore]
     fn live_probe() {
-        let url = std::env::var("SWIFTDL_PROBE_URL").unwrap();
+        let url = std::env::var("MOTLYDL_PROBE_URL").unwrap();
         let ytdlp = super::ytdlp_path();
         for with_js in [false, true] {
             let r = tauri::async_runtime::block_on(super::ytdlp_json(ytdlp.clone(), url.clone(), vec![], with_js));
@@ -1150,15 +1150,15 @@ mod live {
         }
     }
 
-    /// Downloads the smallest quality of SWIFTDL_DL_URL to SWIFTDL_DL_OUT through
+    /// Downloads the smallest quality of MOTLYDL_DL_URL to MOTLYDL_DL_OUT through
     /// the same code path as the app. Run it with PYTHONIOENCODING=gbk to act
     /// like a Chinese-language Windows.
     #[test]
     #[ignore]
     fn live_download() {
-        let url = std::env::var("SWIFTDL_DL_URL").unwrap();
-        let dest = std::path::PathBuf::from(std::env::var("SWIFTDL_DL_OUT").unwrap());
-        let client = swiftdl_engine::build_client().unwrap();
+        let url = std::env::var("MOTLYDL_DL_URL").unwrap();
+        let dest = std::path::PathBuf::from(std::env::var("MOTLYDL_DL_OUT").unwrap());
+        let client = motlydl_engine::build_client().unwrap();
         let job = super::Job { url, format: "wv*+wa/w".into(), dest: dest.clone(), headers: vec![] };
         let r = tauri::async_runtime::block_on(super::run(&client, job, Default::default(), Default::default(), Default::default()));
         match r {
@@ -1170,9 +1170,9 @@ mod live {
     #[test]
     #[ignore]
     fn live_youtube() {
-        let url = std::env::var("SWIFTDL_YT_URL").unwrap();
-        let dest = std::path::PathBuf::from(std::env::var("SWIFTDL_YT_OUT").unwrap());
-        let client = swiftdl_engine::build_client().unwrap();
+        let url = std::env::var("MOTLYDL_YT_URL").unwrap();
+        let dest = std::path::PathBuf::from(std::env::var("MOTLYDL_YT_OUT").unwrap());
+        let client = motlydl_engine::build_client().unwrap();
         let format = "bv*[height=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height=1080]+ba[ext=m4a]/bv*[height=1080]+ba/b[height=1080]/bv*[height<=1080]+ba/b".to_string();
         tauri::async_runtime::block_on(async {
             let t = std::time::Instant::now();

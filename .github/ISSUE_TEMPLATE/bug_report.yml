@@ -21,7 +21,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: SwiftDL version
+      label: MotlyDL version
       placeholder: "0.2.0"
     validations:
       required: true

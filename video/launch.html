@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SwiftDL launch</title>
+<title>MotlyDL launch</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=block" rel="stylesheet">
 <style>
   /* Real material, framed like a screen recording: the pages are captures of
-     the real sites (capture.mjs), and the SwiftDL windows are the app's own UI
+     the real sites (capture.mjs), and the MotlyDL windows are the app's own UI
      (app/ui) running in its preview mode, clicked and fed frame by frame.
      Everything is laid out in 1920x1080 screen pixels; #cam zooms and pans. */
   :root { --ink: #17171c; --muted: #6c6e78; color-scheme: light; }
@@ -76,7 +76,7 @@
   .vbtn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px 0 8px; border-radius: 9px; background: rgba(20,21,26,.86); color: #fff;
     font: 600 12.5px/1 "Segoe UI Variable Text", "Segoe UI", system-ui; letter-spacing: -.005em; box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 6px 20px rgba(0,0,0,.35); backdrop-filter: blur(14px) saturate(1.5); }
 
-  /* SwiftDL's own windows */
+  /* MotlyDL's own windows */
   iframe { border: 0; background: transparent; }
   .dlw { width: 552px; height: 760px; transform-origin: 50% 25%; }
   .appw { left: 300px; top: 130px; width: 1320px; height: 820px; border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 .5px rgba(0,0,0,.3), 0 30px 80px -10px rgba(20,24,40,.4); }
@@ -121,7 +121,7 @@
         <span class="star"><svg viewBox="0 0 24 24"><path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z"/></svg></span></div>
       <div class="ib dlico" id="dlico" style="opacity:0"><svg viewBox="0 0 24 24"><path d="M12 16l-5-5 1.41-1.41L11 12.17V4h2v8.17l2.59-2.58L17 11l-5 5zm-6 4c-.55 0-1-.45-1-1v-3h2v2h10v-2h2v3c0 .55-.45 1-1 1H6z"/></svg>
         <svg class="pring" viewBox="0 0 28 28"><circle cx="14" cy="14" r="12.5" fill="none" stroke="#dfe1e5" stroke-width="2"/><circle id="ringArc" cx="14" cy="14" r="12.5" fill="none" stroke="#0b57d0" stroke-width="2" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/></svg></div>
-      <div class="extico"><svg width="20" height="20" viewBox="0 0 32 32" fill="#202124"><rect x="4.5" y="3" width="4.4" height="12" rx="2.2"/><rect x="10.9" y="3" width="4.4" height="17" rx="2.2"/><rect x="16.7" y="3" width="4.4" height="17" rx="2.2"/><rect x="23.1" y="3" width="4.4" height="12" rx="2.2"/><path d="M6 21.5 16 28l10-6.5" fill="none" stroke="#202124" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="extico"><svg width="20" height="20" viewBox="0 0 32 32" fill="none"><path d="M5.6 21.4V5.8l4.8 5M26.4 21.4V5.8l-4.8 5M16 4.8v15.4M11 16.4l5 4.8 5-4.8M5.8 27.2h20.4" stroke="#202124" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       <div class="ib"><svg viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg></div>
       <div class="ib"><span class="avatar">H</span></div>
       <div class="ib"><svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></div>
@@ -139,7 +139,7 @@
         </div>
         <div class="bub-foot"><span>Full download history</span><svg width="16" height="16" viewBox="0 0 24 24"><path fill="#474747" d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg></div>
       </div>
-      <div class="vbtn abs" id="vbtn" style="left:852px;top:82px;opacity:0"><svg width="16" height="16" viewBox="0 0 32 32" fill="#fff"><rect x="4.5" y="3" width="4.4" height="12" rx="2.2"/><rect x="10.9" y="3" width="4.4" height="17" rx="2.2"/><rect x="16.7" y="3" width="4.4" height="17" rx="2.2"/><rect x="23.1" y="3" width="4.4" height="12" rx="2.2"/><path d="M6 21.5 16 28l10-6.5" fill="none" stroke="#fff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Download video<svg width="10" height="10" viewBox="0 0 24 24" style="opacity:.6;margin-left:2px"><path d="m6 9 6 6 6-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+      <div class="vbtn abs" id="vbtn" style="left:852px;top:82px;opacity:0"><svg width="16" height="16" viewBox="0 0 32 32" fill="none"><path d="M5.6 21.4V5.8l4.8 5M26.4 21.4V5.8l-4.8 5" stroke="#fff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 4.8v15.4M11 16.4l5 4.8 5-4.8" stroke="#38bdf8" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.8 27.2h20.4" stroke="#fff" stroke-width="3.6" stroke-linecap="round"/></svg>Download video<svg width="10" height="10" viewBox="0 0 24 24" style="opacity:.6;margin-left:2px"><path d="m6 9 6 6 6-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></div>
     </div>
   </div>
 
@@ -153,14 +153,14 @@
 <div class="chip abs" id="ff"><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M3 6l9 6-9 6zM12 6l9 6-9 6z"/></svg>Three minutes later</div>
 <div class="caption abs" id="cap"></div>
 
-<div class="card" id="title"><img src="../site/assets/logo.svg" alt="" id="tI"><div class="big" id="tN">SwiftDL</div><div class="lede" id="tL">Every download, at full speed.</div></div>
+<div class="card" id="title"><img src="../site/assets/logo.svg" alt="" id="tI"><div class="big" id="tN">MotlyDL</div><div class="lede" id="tL">Every download, at full speed.</div></div>
 <div class="race" id="race">
   <h2>Same file. Same internet.</h2>
   <div class="lane"><div><b>Your browser</b><span>1 connection</span></div><div class="track"><i id="raceA" style="background:#a2a4ad"></i></div><div class="time" id="timeA" style="color:var(--muted)"></div></div>
-  <div class="lane"><div><b>SwiftDL</b><span>8 connections</span></div><div class="track"><i id="raceB" style="background:#007aff"></i></div><div class="time" id="timeB"></div></div>
+  <div class="lane"><div><b>MotlyDL</b><span>8 connections</span></div><div class="track"><i id="raceB" style="background:#007aff"></i></div><div class="time" id="timeB"></div></div>
 </div>
-<div class="card" id="end"><img src="../site/assets/logo.svg" alt="" id="eI"><div class="big" id="eN">SwiftDL</div><div class="lede" id="eL">Free and open source for Windows, macOS and Linux.</div>
-  <div id="eU" style="margin-top:46px;font:500 28px 'JetBrains Mono',monospace;color:#3c3d45">github.com/harshsinghsv/swiftdl</div></div>
+<div class="card" id="end"><img src="../site/assets/logo.svg" alt="" id="eI"><div class="big" id="eN">MotlyDL</div><div class="lede" id="eL">Free and open source for Windows, macOS and Linux.</div>
+  <div id="eU" style="margin-top:46px;font:500 28px 'JetBrains Mono',monospace;color:#3c3d45">github.com/motly-suana/MotlyDL</div></div>
 
 <script>
 window.DURATION = 58.4;
@@ -213,7 +213,7 @@ window.ready = (async () => {
 })();
 
 // The engine's split, precomputed: a part that finishes takes half of the
-// largest part left, exactly as SwiftDL does.
+// largest part left, exactly as MotlyDL does.
 const SIM = (() => {
   let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   let segs = Array.from({ length: 8 }, (_, i) => ({ s: i / 8, p: i / 8, e: (i + 1) / 8, r: .6 + rnd() * .8 }));
@@ -235,12 +235,12 @@ const simAt = (frac) => { let lo = 0, hi = SIM.length - 1; while (lo < hi) { con
 
 // ---------- the story ----------
 // 0-9.4      the problem: Chrome downloads Ubuntu on one connection, ~1 hour
-// 9.6-13.9   SwiftDL
-// 13.5-30.5  the same file with SwiftDL: eight connections, ~3.5 minutes
+// 9.6-13.9   MotlyDL
+// 13.5-30.5  the same file with MotlyDL: eight connections, ~3.5 minutes
 // 30.5-35.5  the race, side by side
 // 35.5-45.7  YouTube
 // 45.7-58.4  the main window, then the end card
-const C = (t) => t + 9.3, E = (t) => t + 14.3; // the SwiftDL and YouTube acts
+const C = (t) => t + 9.3, E = (t) => t + 14.3; // the MotlyDL and YouTube acts
 const PAGE = [240, 144]; // where the page sits on screen
 const BTN = [PAGE[0] + 1105, PAGE[1] + 522]; // Ubuntu's Download button
 const CAM = [
@@ -267,7 +267,7 @@ const ACTIONS = [
 const CAPTIONS = [
   [2.5, 6.0, "Your browser downloads on a single connection."],
   [6.3, 9.3, "5.9 GB. Almost an hour."],
-  [C(8.1), C(12.4), "The same file, with SwiftDL."],
+  [C(8.1), C(12.4), "The same file, with MotlyDL."],
   [C(12.8), C(17.4), "Eight connections, all working at once."],
   [C(18.0), C(21.2), "Done in three and a half minutes."],
   [E(24.6), E(31.0), "Supports YouTube downloads."],
@@ -332,7 +332,7 @@ function frame(t) {
   // The race, between the two acts: same file, same line.
   const rOp = cubic(prog(t, 30.7, 31.2)) * (1 - cubic(prog(t, 35.0, 35.5)));
   css($("race"), { opacity: rOp, visibility: rOp > 0 ? "visible" : "hidden" });
-  const rk = prog(t, 31.5, 34.3), sw = 211, br = 3356; // seconds: SwiftDL 3:31, browser 56 minutes
+  const rk = prog(t, 31.5, 34.3), sw = 211, br = 3356; // seconds: MotlyDL 3:31, browser 56 minutes
   const elapsed = smooth(rk) * sw;
   $("raceB").style.width = `${(elapsed / sw) * 100}%`;
   $("raceA").style.width = `${(elapsed / br) * 100}%`;
@@ -356,7 +356,7 @@ function frame(t) {
   $("url").innerHTML = onYT ? `youtube.com<span class="path">/watch?v=aqz-KE-bpKQ</span>` : `ubuntu.com<span class="path">/download/desktop</span>`;
   show($("vbtn"), t, E(23.15), E(31.0), { y: -6, blur: 4, inDur: .3 });
 
-  // Chrome's own download, crawling; cancelled before SwiftDL takes over.
+  // Chrome's own download, crawling; cancelled before MotlyDL takes over.
   const bIn2 = expo(prog(t, 1.95, 2.3)), bubOp = bIn2 * (1 - cubic(prog(t, 13.2, 13.5)));
   css($("bubble"), { opacity: bubOp, visibility: bubOp > 0 ? "visible" : "hidden", transform: `scale(${lerp(.96, 1, bIn2)})` });
   $("dlico").style.opacity = t >= 1.95 && t < 13.5 ? 1 : 0;

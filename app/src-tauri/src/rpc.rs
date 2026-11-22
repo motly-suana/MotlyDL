@@ -1,12 +1,12 @@
 //! A local, aria2-compatible JSON-RPC API, so tools that already talk to aria2
-//! (AriaNg, scripts, automation) can control SwiftDL.
+//! (AriaNg, scripts, automation) can control MotlyDL.
 //!
 //! It is off by default. It listens only on this computer unless the user
 //! allows the local network, needs the secret token on every call, and refuses
 //! requests whose Host isn't local (or, on a network, an IP address), which
 //! stops a web page from reaching it by DNS rebinding.
 //!
-//! The same server also serves SwiftDL's own web remote at `/`: a single page
+//! The same server also serves MotlyDL's own web remote at `/`: a single page
 //! that talks to the API.
 
 use crate::manager::{AddRequest, DownloadManager, Item, Status};
@@ -40,14 +40,8 @@ impl Backend for Arc<DownloadManager> {
                 url: url.to_string(),
                 filename: name,
                 dir,
-                headers: vec![],
                 start: true,
-                window: None,
-                format: None,
-                size: None,
-                torrent_files: None,
-                checksum: None,
-                mirrors: vec![],
+                ..Default::default()
             },
         ))
     }
@@ -440,7 +434,7 @@ mod tests {
     fn serves_the_web_remote_page() {
         let port = serve("127.0.0.1:0", Arc::new(fake()), "s3cret".into(), false).unwrap();
         let page = http(port, &format!("127.0.0.1:{port}"), "GET /", "");
-        assert!(page.starts_with("HTTP/1.1 200") && page.contains("<title>SwiftDL Remote</title>") && page.to_lowercase().contains("content-security-policy"), "{}", &page[..page.len().min(300)]);
+        assert!(page.starts_with("HTTP/1.1 200") && page.contains("<title>MotlyDL Remote</title>") && page.to_lowercase().contains("content-security-policy"), "{}", &page[..page.len().min(300)]);
         assert!(!page.contains("s3cret"), "the page never carries the secret");
         let other = http(port, &format!("127.0.0.1:{port}"), "GET /secret-files", "");
         assert!(other.starts_with("HTTP/1.1 404"), "{other}");
@@ -456,12 +450,12 @@ mod tests {
         assert!(!host_allowed("evil.example:6800", true) && !host_allowed("my-pc.local:6800", true), "a name could be DNS rebinding");
     }
 
-    /// `SWIFTDL_REMOTE_PORT=6899 cargo test serve_demo -- --ignored`: the page over the
+    /// `MOTLYDL_REMOTE_PORT=6899 cargo test serve_demo -- --ignored`: the page over the
     /// real server with fake downloads, for looking at it in a browser. Secret: demo
     #[test]
     #[ignore]
     fn serve_demo() {
-        let port: u16 = std::env::var("SWIFTDL_REMOTE_PORT").unwrap().parse().unwrap();
+        let port: u16 = std::env::var("MOTLYDL_REMOTE_PORT").unwrap().parse().unwrap();
         let f = fake();
         f.items.lock().unwrap().push(item(6, "downloading", 250));
         serve(&format!("127.0.0.1:{port}"), Arc::new(f), "demo".into(), false).unwrap();

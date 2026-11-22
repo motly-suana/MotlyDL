@@ -7,7 +7,7 @@ import "./styles.css";
 import "./download.css";
 import { invoke, listen, currentWindow, LogicalSize, $ } from "./api";
 import type { Item, Incoming, Header, MediaInfo, TorrentInfo, AddRequest, ProbeInfo, Settings, Quality } from "./api";
-import { icon, CATS, catOf, bytes, speed, dur, when, esc, host, catInfo, segBar } from "./util";
+import { icon, CATS, catOf, checksumAlgo, bytes, speed, dur, when, esc, host, catInfo, segBar } from "./util";
 
 const win = currentWindow();
 
@@ -67,7 +67,7 @@ async function confirmView(token: number) {
   if (await invoke("is_media_url", { url: inc.url })) return mediaView(token, inc, settings, headers);
   if (await invoke("is_torrent_url", { url: inc.url, filename: inc.filename || null })) return torrentView(token, inc, settings, headers);
 
-  const dirFor = (cat: string) => (settings.sortIntoCategories && cat !== "Other" ? `${settings.downloadDir}\\${cat}` : settings.downloadDir);
+  const dirFor = (cat: string) => invoke("default_dir_for_category", { category: cat });
   view.innerHTML = `
     <div class="d-head"><span id="c-tile">${glyph("Other")}</span><div class="d-name"><input id="c-name" spellcheck="false" placeholder="Getting file details…"><div class="d-sub"><span class="st">${esc(host(inc.url))}</span></div></div></div>
     <div class="kv">
@@ -75,7 +75,7 @@ async function confirmView(token: number) {
       <span class="k">Size</span><span class="v" id="c-size"><span class="spinner"></span><span class="muted">Checking…</span></span>
       <span class="k">Category</span><span class="v"><select id="c-cat">${Object.keys(CATS).map((c) => `<option>${c}</option>`).join("")}</select></span>
       <span class="k">Save to</span><span class="v"><span class="path" id="c-dir" title=""></span><button class="btn sm" id="c-browse">Change</button></span>
-      <span class="k">SHA-256</span><span class="v"><input id="c-sum" spellcheck="false" placeholder="Optional: paste it to check the file"></span>
+      <label class="k" for="c-sum">Checksum</label><span class="v col"><input id="c-sum" spellcheck="false" autocorrect="off" autocapitalize="none" placeholder="Optional: MD5, SHA-1, SHA-256, or SHA-512" aria-invalid="false"><div class="field-err" id="c-sum-err" hidden></div></span>
     </div>
     <div class="d-foot">
       <button class="btn" id="c-later">Download later</button>
@@ -101,16 +101,49 @@ async function confirmView(token: number) {
     $("c-size").innerHTML = `<span class="err">Couldn't reach the file: ${esc(String(e))}</span>`;
   }
   styledSelect($("c-cat") as HTMLSelectElement);
-  $("c-cat").onchange = () => { $("c-tile").innerHTML = glyph($("c-cat").value, $("c-name").value); if (!dirTouched) setDir(dirFor($("c-cat").value)); };
+  $("c-cat").onchange = () => {
+    $("c-tile").innerHTML = glyph($("c-cat").value, $("c-name").value);
+    if (!dirTouched) dirFor($("c-cat").value).then((d) => { if (!dirTouched) setDir(d); });
+  };
   $("c-browse").onclick = async () => { const d = await invoke("pick_folder", { start: dir }); if (d) { setDir(d); dirTouched = true; } };
-  $("c-sum").addEventListener("input", () => $("c-sum").classList.remove("bad"));
+  const validateSum = (showErr: boolean) => {
+    const inp = $("c-sum"), errEl = $("c-sum-err"), raw = inp.value.trim();
+    const ok = !raw || !!checksumAlgo(raw);
+    if (!ok && showErr) {
+      inp.classList.add("bad");
+      inp.setAttribute("aria-invalid", "true");
+      inp.setAttribute("aria-describedby", "c-sum-err");
+      errEl.textContent = "Enter 32 (MD5), 40 (SHA-1), 64 (SHA-256), or 128 (SHA-512) hex characters.";
+      errEl.hidden = false;
+    } else if (ok) {
+      inp.classList.remove("bad");
+      inp.setAttribute("aria-invalid", "false");
+      inp.removeAttribute("aria-describedby");
+      errEl.hidden = true;
+    }
+    return ok;
+  };
+  let sumEdited = false;
+  $("c-sum").addEventListener("input", () => { sumEdited = true; if (validateSum(false)) return; });
+  $("c-sum").addEventListener("blur", () => { if (sumEdited) validateSum(true); });
   $("c-cancel").onclick = () => { invoke("forget_confirm", { token }); $("w-close").click(); };
   const add = async (start: boolean) => {
     const filename = $("c-name").value.trim();
     if (!filename) return;
     const sum = $("c-sum").value.trim().toLowerCase();
-    if (sum && !/^[a-f0-9]{64}$/.test(sum)) { $("c-sum").classList.add("bad"); $("c-sum").title = "A SHA-256 is 64 letters and digits"; $("c-sum").focus(); return; }
-    const id = await addDownload({ url: inc.url, filename, dir, headers, start, window: win?.label, checksum: sum || null });
+    if (!validateSum(true)) { $("c-sum").focus(); return; }
+    const id = await addDownload({
+      url: inc.url,
+      filename,
+      dir,
+      headers,
+      start,
+      window: win?.label,
+      checksum: sum || null,
+      category: $("c-cat").value,
+      contentType: info?.contentType || inc.contentType || null,
+      pageUrl: inc.pageUrl || inc.referrer || null,
+    });
     if (id == null) return;
     invoke("forget_confirm", { token });
     if (!start) { $("w-close").click(); return; }
@@ -128,7 +161,7 @@ async function confirmView(token: number) {
 const safeName = (s: string) => s.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "").slice(0, 150) || "video";
 async function mediaView(token: number, inc: Incoming, settings: Settings, headers: Header[]) {
   let dir = settings.downloadDir, dirTouched = false, info: MediaInfo | null = null;
-  const dirFor = (cat: string) => (settings.sortIntoCategories && cat !== "Other" ? `${settings.downloadDir}\\${cat}` : settings.downloadDir);
+  const dirFor = (cat: string) => invoke("default_dir_for_category", { category: cat });
   view.innerHTML = `
     <div class="d-head"><span id="c-tile">${glyph("Video")}</span><div class="d-name"><input id="c-name" spellcheck="false" placeholder="Getting video details…"><div class="d-sub"><span class="st">${esc(host(inc.url))}</span></div></div></div>
     <div class="kv">
@@ -143,7 +176,7 @@ async function mediaView(token: number, inc: Incoming, settings: Settings, heade
       <button class="btn primary" id="c-start" disabled>Start download</button>
     </div>`;
   const setDir = (d: string) => { dir = d; $("c-dir").textContent = d; $("c-dir").title = d; };
-  setDir(dirFor("Video"));
+  dirFor("Video").then((d) => { if (!dirTouched) setDir(d); }).catch(() => setDir(settings.downloadDir));
   // Say what is actually happening, with the seconds so far: fetching the
   // video tools the first time, otherwise waiting on the site.
   const site = host(inc.url).replace(/^www\./, "");
@@ -161,7 +194,7 @@ async function mediaView(token: number, inc: Incoming, settings: Settings, heade
     const q = quality(), cat = q.ext === "mp4" || q.ext === "webm" ? "Video" : "Music";
     $("c-name").value = $("c-name").value.replace(/\.[a-z0-9]{2,4}$/i, "") + `.${q.ext}`;
     $("c-tile").innerHTML = glyph(cat, $("c-name").value);
-    if (!dirTouched) setDir(dirFor(cat));
+    if (!dirTouched) dirFor(cat).then((d) => { if (!dirTouched) setDir(d); }).catch(() => {});
   };
   try {
     // The extension may have read the qualities from the page already: then
@@ -298,20 +331,22 @@ function render() {
   const paused = state === "paused";
   const torrent = Array.isArray(it.torrentFiles);
   const media = !!it.format || torrent;
+  const expired = state === "error" && !media && /\b(401|403|410)\b|web page|expired/i.test(it.error || "");
   const showDetails = details && !media && (state === "run" || state === "paused");
-  const key = `${state}:${showDetails}`;
+  const key = `${state}:${showDetails}:${expired}`;
   if (layout !== key) {
     layout = key;
     const buttons = {
       run: `<button class="btn" data-a="cancel">Cancel</button><button class="btn" data-a="pause">Pause</button>`,
       paused: `<button class="btn" data-a="cancel">Cancel</button><button class="btn primary" data-a="resume">Resume</button>`,
       done: `<button class="btn" data-a="folder">Show in folder</button><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="open">Open</button>`,
-      error: `<button class="btn" data-a="close">Close</button><button class="btn primary" data-a="resume">Retry</button>`,
+      error: `${expired ? `<button class="btn" data-a="refresh">Refresh address</button>` : ""}<button class="btn" data-a="close">Close</button><button class="btn primary" data-a="resume">Retry</button>`,
     }[state];
     view.innerHTML = `
       <div class="d-head">${glyph(cat, it.filename)}<div class="d-name"><b title="${esc(it.filename)}">${esc(it.filename)}</b><div class="d-sub" id="p-sub"></div></div></div>
       <div class="p-top"><span id="p-left"></span><span class="p-pct" id="p-pct"></span></div>
       <div class="segbar" id="p-bar"></div>
+      <div class="seg-legend" id="p-seg-legend" hidden><span id="p-seg-sum"></span><span class="dots"><span><i class="done"></i>Done</span><span><i></i>Active</span></span></div>
       <div class="p-meta" id="p-right"></div>
       <div class="kv" id="p-kv"></div>
       ${showDetails ? `<div class="conn"><div class="cscroll"><table class="ctable"><thead><tr><th>Part</th><th>Size</th><th>Received</th><th>Status</th></tr></thead><tbody id="p-rows"></tbody></table></div></div>` : ""}
@@ -341,15 +376,23 @@ function render() {
     : state === "done" ? `Finished ${whenFull(it.completedAt)}` : "";
   const bar = $("p-bar");
   bar.className = `segbar ${state} ${!it.size && state === "run" ? "indet" : ""}`;
-  segBar(bar, null, undefined, pct);
+  const segs = (it.segments || []).filter(([s, , e]) => e > s);
+  segBar(bar, !media ? it.size : null, !media ? segs : undefined, pct);
+  const showSegMap = !media && (state === "run" || state === "paused") && segs.length > 1;
+  $("p-seg-legend").hidden = !showSegMap;
+  if (showSegMap) {
+    const doneSegs = segs.filter(([, p, e]) => p >= e).length;
+    $("p-seg-sum").textContent = `${doneSegs} of ${segs.length} segments done`;
+  }
   const row = (k: string, v: string, cls = "") => `<span class="k">${k}</span><span class="v"><span class="${cls}" title="${esc(v)}">${esc(v)}</span></span>`;
   const kv = row("Location", dir, "path") +
-    (state === "done" ? "" : torrent ? row("Files", it.torrentFiles!.length ? `${it.torrentFiles!.length} selected` : "All") : media ? row("Quality", qualityLabel(it.format)) : row("Resume", it.resumable ? "Supported" : "Not supported by this server")) +
+    (state === "done"
+      ? (it.verified ? row("Checksum", `${checksumAlgo(it.checksum) || "Checksum"} matches`, "ok") : "")
+      : torrent ? row("Files", it.torrentFiles!.length ? `${it.torrentFiles!.length} selected` : "All") : media ? row("Quality", qualityLabel(it.format)) : row("Resume", it.resumable ? "Supported" : "Not supported by this server")) +
     row("Address", it.url);
   if ($("p-kv").innerHTML !== kv) $("p-kv").innerHTML = kv;
 
   if (showDetails) {
-    const segs = (it.segments || []).filter(([s, , e]) => e > s);
     $("p-rows").innerHTML = segs.map(([s, p, e], n) => {
       const done = p >= e;
       return `<tr class="${done ? "done" : ""}"><td>${n + 1}</td><td>${bytes(e - s)}</td><td>${Math.floor(((p - s) / Math.max(1, e - s)) * 100)}%</td><td>${done ? "Done" : paused ? "Paused" : "Receiving"}</td></tr>`;
@@ -372,6 +415,14 @@ view.addEventListener("click", async (e) => {
     case "resume": layout = ""; invoke("resume", { ids: [id] }); break;
     case "open": invoke("open_file", { id }); $("w-close").click(); break;
     case "folder": invoke("open_folder", { id }); break;
+    case "refresh":
+      try {
+        await invoke("start_refresh", { id });
+        $("p-sub").innerHTML = `<span class="st">Opened source page — start the download again in your browser to resume</span><span class="from">from ${esc(host(current.url))}</span>`;
+      } catch (err) {
+        $("p-sub").innerHTML = `<span class="st err">${esc(String(err))}</span>`;
+      }
+      break;
     case "close": $("w-close").click(); break;
     case "cancel":
       // Ask twice instead of a second dialog: the button arms for 3 s.

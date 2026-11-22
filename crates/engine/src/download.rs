@@ -25,7 +25,7 @@ const SAVE_EVERY: Duration = Duration::from_secs(1);
 
 pub struct Request {
     pub url: String,
-    /// Final file path. `<dest>.part` and `<dest>.swiftdl` live beside it
+    /// Final file path. `<dest>.part` and `<dest>.motlydl` live beside it
     /// until the download completes.
     pub dest: PathBuf,
     pub connections: usize,
@@ -154,7 +154,9 @@ pub fn build_client_opts(proxy: &str, bind: &str) -> Result<Client> {
         // one congestion window, which defeats the point. Force HTTP/1.1 so
         // each segment gets its own TCP connection.
         .http1_only()
-        .user_agent(concat!("swiftdl/", env!("CARGO_PKG_VERSION")))
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
+        .user_agent(concat!("motlydl/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(30))
         .build()?)
@@ -179,7 +181,7 @@ pub async fn run(
     progress.resumable.store(remote.resumable, Ordering::Relaxed);
 
     let part = part_path(&req.dest);
-    let state_path = append_ext(&req.dest, "swiftdl");
+    let state_path = append_ext(&req.dest, "motlydl");
     let outcome = match (remote.resumable, remote.size) {
         (true, Some(size)) => {
             download_segmented(client.clone(), req, &remote, size, &part, &state_path, progress, cancel, limiter)
@@ -451,14 +453,14 @@ pub fn part_path(dest: &Path) -> PathBuf {
 /// file (a link that expired and was replaced). The size and the server's
 /// validators are still checked when it resumes, so a different file starts over.
 pub fn rebase_saved(dest: &Path, new_url: &str) -> bool {
-    let path = append_ext(dest, "swiftdl");
+    let path = append_ext(dest, "motlydl");
     let Some(mut s) = SavedState::load(&path) else { return false };
     s.url = new_url.to_string();
     s.save(&path).is_ok()
 }
 
 pub fn saved_remaining(dest: &Path) -> Option<Vec<(u64, u64)>> {
-    SavedState::load(&append_ext(dest, "swiftdl")).map(|s| s.segments)
+    SavedState::load(&append_ext(dest, "motlydl")).map(|s| s.segments)
 }
 
 fn append_ext(path: &Path, ext: &str) -> PathBuf {
@@ -474,16 +476,16 @@ mod rebase_tests {
 
     #[test]
     fn a_refreshed_link_keeps_its_progress() {
-        let dest = std::env::temp_dir().join("swiftdl-rebase-test.bin");
+        let dest = std::env::temp_dir().join("motlydl-rebase-test.bin");
         let state = SavedState { url: "https://x/f?token=old".into(), size: 100, etag: Some("e".into()), last_modified: None, segments: vec![(40, 100)] };
-        state.save(&append_ext(&dest, "swiftdl")).unwrap();
+        state.save(&append_ext(&dest, "motlydl")).unwrap();
         assert!(!state.matches("https://x/f?token=new", 100, &Some("e".into()), &None), "a different address would start over");
         assert!(rebase_saved(&dest, "https://x/f?token=new"));
-        let moved = SavedState::load(&append_ext(&dest, "swiftdl")).unwrap();
+        let moved = SavedState::load(&append_ext(&dest, "motlydl")).unwrap();
         assert!(moved.matches("https://x/f?token=new", 100, &Some("e".into()), &None));
         assert!(!moved.matches("https://x/f?token=new", 101, &Some("e".into()), &None), "a different size still starts over");
         assert_eq!(moved.segments, vec![(40, 100)]);
-        let _ = std::fs::remove_file(append_ext(&dest, "swiftdl"));
+        let _ = std::fs::remove_file(append_ext(&dest, "motlydl"));
         assert!(!rebase_saved(&dest, "https://x/f"), "nothing saved, nothing to move");
     }
 }
@@ -526,7 +528,7 @@ mod mirror_tests {
     }
 
     async fn download(urls: Vec<String>, name: &str) -> Vec<u8> {
-        let dest = std::env::temp_dir().join(format!("swiftdl-mirror-{name}-{}.bin", std::process::id()));
+        let dest = std::env::temp_dir().join(format!("motlydl-mirror-{name}-{}.bin", std::process::id()));
         let _ = std::fs::remove_file(&dest);
         let req = Request { url: urls[0].clone(), dest: dest.clone(), connections: 4, headers: Default::default(), restart: true, mirrors: urls[1..].to_vec() };
         let client = build_client().unwrap();

@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use swiftdl_engine::{Client, header};
+use motlydl_engine::{Client, header};
 
 const REAL: &str = "https://api.real-debrid.com/rest/1.0";
 const ALL: &str = "https://api.alldebrid.com/v4";
@@ -83,7 +83,7 @@ async fn domains(client: &Client, p: Provider) -> Result<Vec<String>> {
     }
     let url = match p {
         Provider::Real => format!("{REAL}/hosts/domains"),
-        Provider::All => format!("{ALL}/hosts/domains?agent=swiftdl"),
+        Provider::All => format!("{ALL}/hosts/domains?agent=motlydl"),
         Provider::Premiumize => format!("{PREMIUMIZE}/services/list"),
     };
     let text = client.get(url).send().await?.error_for_status()?.text().await?;
@@ -172,7 +172,7 @@ pub async fn resolve(client: &Client, provider: &str, token: &str, url: &str) ->
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(format!("link={}", enc(url))),
         Provider::All => client
-            .get(format!("{ALL}/link/unlock?agent=swiftdl&link={}", enc(url)))
+            .get(format!("{ALL}/link/unlock?agent=motlydl&link={}", enc(url)))
             .header(header::AUTHORIZATION, format!("Bearer {token}")),
         Provider::Premiumize => client
             .post(format!("{PREMIUMIZE}/transfer/directdl"))
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     #[ignore]
     fn live_hosts() {
-        let client = swiftdl_engine::build_client().unwrap();
+        let client = motlydl_engine::build_client().unwrap();
         for p in [Provider::Real, Provider::All, Provider::Premiumize] {
             let list = tauri::async_runtime::block_on(domains(&client, p)).unwrap();
             println!("{}: {} hosts, for example {:?}", p.name(), list.len(), &list[..list.len().min(3)]);

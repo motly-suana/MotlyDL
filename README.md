@@ -1,31 +1,29 @@
 <div align="center">
 
-<img src="app/icon.svg" width="88" alt="SwiftDL" />
+<img src="app/icon.svg" width="88" alt="MotlyDL" />
 
-# SwiftDL
+# MotlyDL
 
 ### Every download, at full speed.
 
-The free, open-source download manager for Windows, macOS and Linux.
+The free, open-source download manager for Windows, macOS and Linux (forked from [SwiftDL](https://github.com/harshsinghsv/swiftdl), MIT licensed).
 
-[![Latest release](https://img.shields.io/github/v/release/harshsinghsv/swiftdl?style=flat-square&color=007aff&label=release)](https://github.com/harshsinghsv/swiftdl/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/harshsinghsv/swiftdl/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/harshsinghsv/swiftdl/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/motly-suana/MotlyDL?style=flat-square&color=007aff&label=release)](https://github.com/motly-suana/MotlyDL/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/motly-suana/MotlyDL/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/motly-suana/MotlyDL/actions/workflows/ci.yml)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-555?style=flat-square)](#download)
 [![Built with Rust and Tauri](https://img.shields.io/badge/built_with-Rust_%2B_Tauri-dea584?style=flat-square&logo=rust&logoColor=white)](#how-it-works)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 
 <br />
 
-<img src="docs/assets/demo.gif" width="900" alt="Clicking Download on the Ubuntu website opens SwiftDL's New download window; after Start, the 5.9 GB file downloads over eight connections at about 29 MB/s" />
-
-<sub>▶&nbsp; <a href="https://github.com/harshsinghsv/swiftdl/releases/download/v0.2.1/swiftdl-launch.mp4"><b>Watch the one-minute launch video</b></a></sub>
+<img src="docs/assets/demo.gif" width="900" alt="Clicking Download on the Ubuntu website opens MotlyDL's New download window; after Start, the 5.9 GB file downloads over eight connections at about 29 MB/s" />
 
 <br />
 <br />
 
-<a href="https://github.com/harshsinghsv/swiftdl/releases/latest"><img src="https://img.shields.io/badge/Download_SwiftDL-18181b?style=for-the-badge" alt="Download SwiftDL" height="40" /></a>
+<a href="https://github.com/motly-suana/MotlyDL/releases/latest"><img src="https://img.shields.io/badge/Download_MotlyDL-18181b?style=for-the-badge" alt="Download MotlyDL" height="40" /></a>
 
-[Why SwiftDL](#your-browser-is-the-bottleneck) · [Download](#download) · [Features](#features) · [How it works](#how-it-works) · [Browser extension](#browser-extension) · [FAQ](#faq) · [Build from source](#build-from-source)
+[Why MotlyDL](#your-browser-is-the-bottleneck) · [Download](#download) · [Features](#features) · [How it works](#how-it-works) · [Browser extension](#browser-extension) · [FAQ](#faq) · [Build from source](#build-from-source)
 
 </div>
 
@@ -37,34 +35,34 @@ Browsers download every file over **a single connection**, and many servers cap 
 
 <p align="center"><img src="docs/assets/problem.png" width="820" alt="Chrome's download bubble: ubuntu-26.04.1-desktop-amd64.iso at under 2 MB/s, 56 minutes left" /></p>
 
-SwiftDL splits the same file across many connections at once, keeps every one of them busy until the last byte, and writes straight into the final file. Same file, same internet:
+MotlyDL splits the same file across many connections at once, keeps every one of them busy until the last byte, and writes straight into the final file. Same file, same internet:
 
-<p align="center"><img src="docs/assets/race.gif" width="820" alt="Same file, same internet: your browser on one connection takes 56 minutes, SwiftDL on eight connections takes 3 minutes 31 seconds" /></p>
+<p align="center"><img src="docs/assets/race.gif" width="820" alt="Same file, same internet: your browser on one connection takes 56 minutes, MotlyDL on eight connections takes 3 minutes 31 seconds" /></p>
 
 And it saves its progress every second, so a crash, a closed laptop or a dropped Wi-Fi connection never means starting over.
 
 ## See it in action
 
-Click a download in your browser and SwiftDL takes it from there, with your cookies, so downloads behind a login still work. On video sites, the **Download video** button on the player lets you pick a quality, from 4K down to audio only:
+Click a download in your browser and MotlyDL takes it from there, with your cookies, so downloads behind a login still work. On video sites, the **Download video** button on the player lets you pick a quality, from 4K down to audio only:
 
-<p align="center"><img src="docs/assets/youtube.gif" width="820" alt="On a YouTube video, SwiftDL's Download video button opens a window with the quality set to 1080p60; the 412 MB video downloads and merges" /></p>
+<p align="center"><img src="docs/assets/youtube.gif" width="820" alt="On a YouTube video, MotlyDL's Download video button opens a window with the quality set to 1080p60; the 412 MB video downloads and merges" /></p>
 
 Everything lands in one place: live speed, every connection, queue, pause and resume.
 
-<p align="center"><img src="docs/assets/app-dark.png" width="1000" alt="SwiftDL main window: downloads grouped by status, with live speed, connections and a detail panel" /></p>
+<p align="center"><img src="docs/assets/app-dark.png" width="1000" alt="MotlyDL main window: downloads grouped by status, with live speed, connections and a detail panel" /></p>
 
 ## Download
 
 | Platform | Installer |
 | --- | --- |
-| **Windows** 10 and 11 | [`SwiftDL_x.y.z_x64-setup.exe`](https://github.com/harshsinghsv/swiftdl/releases/latest), installs per user, no admin rights needed |
-| **macOS** (Apple silicon and Intel) | [`SwiftDL_x.y.z_universal.dmg`](https://github.com/harshsinghsv/swiftdl/releases/latest) |
-| **Linux** | [`.AppImage`, `.deb` or `.rpm`](https://github.com/harshsinghsv/swiftdl/releases/latest) |
+| **Windows** 10 and 11 | [`MotlyDL_x.y.z_x64-setup.exe`](https://github.com/motly-suana/MotlyDL/releases/latest), installs per user, no admin rights needed |
+| **macOS** (Apple silicon and Intel) | [`MotlyDL_x.y.z_universal.dmg`](https://github.com/motly-suana/MotlyDL/releases/latest) |
+| **Linux** | [`.AppImage`, `.deb` or `.rpm`](https://github.com/motly-suana/MotlyDL/releases/latest) |
 
-Then add the [browser extension](#browser-extension) so SwiftDL can catch your downloads.
+Then add the [browser extension](#browser-extension) so MotlyDL can catch your downloads.
 
 > [!NOTE]
-> The official source for SwiftDL is [github.com/harshsinghsv/swiftdl](https://github.com/harshsinghsv/swiftdl). Download installers only from its [Releases page](https://github.com/harshsinghsv/swiftdl/releases).
+> The official source for MotlyDL is [github.com/motly-suana/MotlyDL](https://github.com/motly-suana/MotlyDL). Download installers only from its [Releases page](https://github.com/motly-suana/MotlyDL/releases).
 
 ## Features
 
@@ -89,7 +87,7 @@ When your browser hands over a file, a small window asks where to save it. Press
 
 ### Know what you're getting first
 
-SwiftDL checks the file before downloading: its real name, size, type and whether the server can resume it. Pick a category and folder, or **Download later** to queue it.
+MotlyDL checks the file before downloading: its real name, size, type and whether the server can resume it. Pick a category and folder, or **Download later** to queue it.
 
 </td>
 </tr>
@@ -111,24 +109,24 @@ SwiftDL checks the file before downloading: its real name, size, type and whethe
 
 **Also included**
 
-- **Resume anything.** Pause, quit, lose your connection or crash: SwiftDL continues where it stopped.
-- **Torrents and magnet links.** Pick the files you want; SwiftDL opens magnet links and .torrent files from anywhere.
+- **Resume anything.** Pause, quit, lose your connection or crash: MotlyDL continues where it stopped.
+- **Torrents and magnet links.** Pick the files you want; MotlyDL opens magnet links and .torrent files from anywhere.
 - **Download video button.** A button appears over video players and lists the video and audio files the page loaded.
 - **Queue and speed limit.** Choose how many downloads run at once and cap total bandwidth.
-- **Tidy by default.** Files are sorted into Video, Music, Programs, Compressed and Documents folders.
+- **Tidy by default.** Files are sorted into Games, Video, Music, Programs, Compressed and Documents folders.
 - **Command palette.** Press <kbd>Ctrl</kbd> <kbd>K</kbd> to find a download or run any action.
 - **Lives in the tray.** Close the window and downloads keep going.
 - **Light and dark.** Follows your system, or pick one in Settings.
 
 <div align="center">
-<img src="docs/assets/app-light.png" alt="SwiftDL in light mode" width="1000" />
+<img src="docs/assets/app-light.png" alt="MotlyDL in light mode" width="1000" />
 </div>
 
 ## How it works
 
-<img src="docs/assets/how-it-works.svg" alt="Your browser hands the link and cookies to SwiftDL; the app asks where to save it and shows a window; the engine checks the file, reserves it and downloads every part over its own connection, straight into the final file." width="1100" />
+<img src="docs/assets/how-it-works.svg" alt="Your browser hands the link and cookies to MotlyDL; the app asks where to save it and shows a window; the engine checks the file, reserves it and downloads every part over its own connection, straight into the final file." width="1100" />
 
-1. **Check.** SwiftDL asks the server for the first byte. The answer reveals the file's size and whether it can be downloaded in parts.
+1. **Check.** MotlyDL asks the server for the first byte. The answer reveals the file's size and whether it can be downloaded in parts.
 2. **Reserve.** The full-size file is created on disk, so every connection can write to its own place.
 3. **Split.** The file is divided into parts, one per connection, each fetched with an HTTP range request.
 4. **Rebalance.** When a connection finishes early, it takes over half of the largest remaining part.
@@ -142,26 +140,26 @@ Eight connections finishing in exactly an eighth of the time shows the rebalanci
 
 ## Browser extension
 
-The SwiftDL extension works in **Chrome, Edge, Brave, Vivaldi and Firefox**:
+The MotlyDL extension works in **Chrome, Edge, Brave, Vivaldi and Firefox**:
 
-- Sends browser downloads to SwiftDL, with your cookies and referrer.
-- Adds **Download with SwiftDL** to the right-click menu on links and media.
+- Sends browser downloads to MotlyDL, with your cookies and referrer.
+- Adds **Download with MotlyDL** to the right-click menu on links and media.
 - Shows a **Download video** button over video players.
 - Hold <kbd>Alt</kbd> while clicking a link to let the browser handle that download.
 - Can be turned off for a single site from its popup.
 
-**Firefox:** install it from [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/swiftdl-integration/), or click **Add to Firefox** in SwiftDL's **Settings → Browser**.
+**Firefox:** download `motlydl-firefox.xpi` from the [latest release](https://github.com/motly-suana/MotlyDL/releases/latest), or load `extension/` temporarily from `about:debugging`.
 
-**Chrome, Edge, Brave and Vivaldi:** the extension comes with SwiftDL, so there's nothing extra to download. In SwiftDL, click **Add the extension** (or go to **Settings → Browser**) and follow the four steps:
+**Chrome, Edge, Brave and Vivaldi:** the extension comes with MotlyDL, so there's nothing extra to download. In MotlyDL, click **Add the extension** (or go to **Settings → Browser**) and follow the four steps:
 
 1. Open `chrome://extensions` (or `edge://extensions`).
 2. Turn on **Developer mode**.
 3. Click **Load unpacked**.
-4. Choose SwiftDL's extension folder. The **Open extension folder** button takes you there. On Windows it's `%LOCALAPPDATA%\SwiftDL\extension`.
+4. Choose MotlyDL's extension folder. The **Open extension folder** button takes you there. On Windows it's `%LOCALAPPDATA%\MotlyDL\extension`.
 
-Use that folder rather than a copy: it stays in place while SwiftDL is installed and is refreshed when SwiftDL updates. If you don't have the app installed, `swiftdl-extension.zip` on the [latest release](https://github.com/harshsinghsv/swiftdl/releases/latest) has the same files.
+Use that folder rather than a copy: it stays in place while MotlyDL is installed and is refreshed when MotlyDL updates. If you don't have the app installed, `motlydl-extension.zip` on the [latest release](https://github.com/motly-suana/MotlyDL/releases/latest) has the same files.
 
-Once the extension is on the Chrome Web Store, SwiftDL will offer it automatically: Chrome, Edge and Brave show a one-time **New extension added** prompt and you click **Enable**. No browser lets an app install an extension silently.
+Once the extension is on the Chrome Web Store, MotlyDL will offer it automatically: Chrome, Edge and Brave show a one-time **New extension added** prompt and you click **Enable**. No browser lets an app install an extension silently.
 
 ## FAQ
 
@@ -174,13 +172,13 @@ When the server limits each connection, which many do, yes, by roughly the numbe
 <details>
 <summary><b>Can it download videos from YouTube?</b></summary>
 
-Yes, and from Vimeo, X, Reddit and other video sites. Click the **Download video** button on the player (or paste the link into **New download**) and pick a quality, from 4K down to audio only. These sites don't serve a plain file, so SwiftDL uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) for them, plus ffmpeg to join the video and audio. Both are downloaded the first time you need them (on macOS and Linux, install ffmpeg with Homebrew or your package manager), and yt-dlp is kept up to date. Only download what you have the right to. DRM-protected video, like Netflix, will never be supported.
+Yes, and from Vimeo, X, Reddit and other video sites. Click the **Download video** button on the player (or paste the link into **New download**) and pick a quality, from 4K down to audio only. These sites don't serve a plain file, so MotlyDL uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) for them, plus ffmpeg to join the video and audio. Both are downloaded the first time you need them (on macOS and Linux, install ffmpeg with Homebrew or your package manager), and yt-dlp is kept up to date. Only download what you have the right to. DRM-protected video, like Netflix, will never be supported.
 </details>
 
 <details>
 <summary><b>What happens if my PC crashes mid-download?</b></summary>
 
-Open SwiftDL and press **Resume**. Progress is saved every second, so at most a second of data is downloaded again, as long as the server supports resuming. SwiftDL tells you up front when it doesn't.
+Open MotlyDL and press **Resume**. Progress is saved every second, so at most a second of data is downloaded again, as long as the server supports resuming. MotlyDL tells you up front when it doesn't.
 </details>
 
 <details>
@@ -190,7 +188,7 @@ Yes, when they come from the browser extension. It passes the site's cookies, re
 </details>
 
 <details>
-<summary><b>Does SwiftDL collect any data?</b></summary>
+<summary><b>Does MotlyDL collect any data?</b></summary>
 
 No. It has no accounts, analytics or telemetry. It only connects to the servers you download from.
 </details>
@@ -198,7 +196,7 @@ No. It has no accounts, analytics or telemetry. It only connects to the servers 
 <details>
 <summary><b>How do I uninstall it?</b></summary>
 
-Use **Apps & features** on Windows (or remove the app on macOS and Linux). The uninstaller also removes SwiftDL's browser registrations.
+Use **Apps & features** on Windows (or remove the app on macOS and Linux). The uninstaller also removes MotlyDL's browser registrations.
 </details>
 
 ## Build from source
@@ -206,8 +204,8 @@ Use **Apps & features** on Windows (or remove the app on macOS and Linux). The u
 You need [Rust](https://rustup.rs) and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 
 ```bash
-git clone https://github.com/harshsinghsv/swiftdl
-cd swiftdl
+git clone https://github.com/motly-suana/MotlyDL
+cd MotlyDL
 cargo install tauri-cli --version "^2" --locked
 cargo test --workspace
 cd app/src-tauri && cargo tauri dev
@@ -216,7 +214,7 @@ cd app/src-tauri && cargo tauri dev
 | Path | What it is |
 | --- | --- |
 | [`crates/engine`](crates/engine) | The download engine: probing, segmentation, rebalancing, resume and speed limiting |
-| [`crates/cli`](crates/cli) | `swiftdl`, a command-line downloader built on the engine |
+| [`crates/cli`](crates/cli) | `motlydl`, a command-line downloader built on the engine |
 | [`app/src-tauri`](app/src-tauri) | The desktop app: download manager, windows, tray and browser integration |
 | [`app/ui`](app/ui) | The interface |
 | [`extension`](extension) | The Chromium extension (Manifest V3) |
@@ -230,4 +228,4 @@ Bug reports, ideas and pull requests are welcome. Start with [CONTRIBUTING.md](C
 
 ## License
 
-SwiftDL is released under the [MIT License](LICENSE).
+MotlyDL is released under the [MIT License](LICENSE).

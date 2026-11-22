@@ -27,7 +27,7 @@
   <!-- 1. Browser -->
   <rect class="card" x="32" y="60" width="250" height="150" rx="12"/>
   <text class="title" x="56" y="98">Your browser</text>
-  <text class="sub" x="56" y="124">SwiftDL extension catches the</text>
+  <text class="sub" x="56" y="124">MotlyDL extension catches the</text>
   <text class="sub" x="56" y="144">download, or finds the video</text>
   <text class="sub" x="56" y="164">on the page</text>
 
@@ -39,7 +39,7 @@
 
   <!-- 2. App -->
   <rect class="card" x="364" y="60" width="250" height="150" rx="12"/>
-  <text class="title" x="388" y="98">SwiftDL app</text>
+  <text class="title" x="388" y="98">MotlyDL app</text>
   <text class="sub" x="388" y="124">Asks where to save it, queues</text>
   <text class="sub" x="388" y="144">it, and shows its own window</text>
   <text class="sub" x="388" y="164">with live progress</text>

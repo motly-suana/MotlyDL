@@ -94,4 +94,11 @@ body.dlw { overflow: hidden; --win-edge: rgba(0, 0, 0, .1); }
 .kv .v input { width: 100%; height: 26px; padding: 0 8px; border: 0; border-radius: 6px; background: var(--btn-bg); color: var(--text); font: inherit; user-select: text; }
 .kv .v input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--accent); }
 .kv .v input::placeholder { color: var(--faint); }
-.kv .v input.bad { box-shadow: inset 0 0 0 1px var(--red); }
+.kv .v input.bad, .kv .v input[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--red); }
+.kv .v.col { flex-direction: column; align-items: stretch; gap: 3px; }
+.field-err { font-size: 11.5px; color: var(--red); line-height: 1.35; }
+.seg-legend { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.seg-legend .dots { display: inline-flex; align-items: center; gap: 10px; }
+.seg-legend .dots span { display: inline-flex; align-items: center; gap: 5px; }
+.seg-legend i { width: 7px; height: 7px; border-radius: 2px; background: var(--accent); }
+.seg-legend i.done { background: var(--green); }

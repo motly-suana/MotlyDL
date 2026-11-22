@@ -1,16 +1,17 @@
 [package]
-name = "swiftdl-cli"
-description = "Command-line front end for the swiftdl engine"
+name = "motlydl-cli"
+description = "Command-line front end for the motlydl engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [[bin]]
-name = "swiftdl"
+name = "motlydl"
 path = "src/main.rs"
 
 [dependencies]
-swiftdl-engine = { path = "../engine" }
+motlydl-engine = { path = "../engine" }
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 indicatif = "0.18.6"

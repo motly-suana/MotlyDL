@@ -1,6 +1,6 @@
 //! Functions the UI calls through `invoke(...)`.
 
-use crate::manager::{AddRequest, DownloadManager, Incoming, Item, category_for, to_header_map};
+use crate::manager::{AddRequest, DownloadManager, Incoming, Item, category_for, category_for_with_mime, to_header_map};
 use crate::settings::Settings;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -27,6 +27,7 @@ pub struct ProbeInfo {
     resumable: bool,
     category: String,
     dir: PathBuf,
+    content_type: Option<String>,
 }
 
 #[tauri::command]
@@ -43,28 +44,34 @@ pub async fn probe_url(m: Mgr<'_>, url: String, headers: Vec<(String, String)>) 
     let (service, token) = m.debrid();
     if let Some(direct) = crate::debrid::resolve(m.client(), &service, &token, url.trim()).await.map_err(|e| format!("{e:#}"))? {
         let category = category_for(&direct.filename).to_string();
-        return Ok(ProbeInfo { dir: m.default_dir(&category), filename: direct.filename, size: direct.size, resumable: true, category });
+        return Ok(ProbeInfo { dir: m.default_dir(&category), filename: direct.filename, size: direct.size, resumable: true, category, content_type: None });
     }
     if crate::ftp::is_ftp(url.trim()) {
         let u = url.trim().to_string();
         let (filename, size) = tauri::async_runtime::spawn_blocking(move || crate::ftp::probe(&u)).await.map_err(|e| e.to_string())?.map_err(|e| format!("{e:#}"))?;
         let category = category_for(&filename).to_string();
-        return Ok(ProbeInfo { dir: m.default_dir(&category), filename, size, resumable: true, category });
+        return Ok(ProbeInfo { dir: m.default_dir(&category), filename, size, resumable: true, category, content_type: None });
     }
-    let remote = swiftdl_engine::probe(m.client(), url.trim(), &to_header_map(&headers)).await.map_err(|e| format!("{e:#}"))?;
-    let category = category_for(&remote.filename).to_string();
+    let remote = motlydl_engine::probe(m.client(), url.trim(), &to_header_map(&headers)).await.map_err(|e| format!("{e:#}"))?;
+    let category = category_for_with_mime(&remote.filename, remote.content_type.as_deref()).to_string();
     Ok(ProbeInfo {
         dir: m.default_dir(&category),
         filename: remote.filename,
         size: remote.size,
         resumable: remote.resumable,
         category,
+        content_type: remote.content_type,
     })
 }
 
 #[tauri::command]
 pub fn default_dir(m: Mgr, filename: String) -> PathBuf {
     m.default_dir(category_for(&filename))
+}
+
+#[tauri::command]
+pub fn default_dir_for_category(m: Mgr, category: String) -> PathBuf {
+    m.default_dir(&category)
 }
 
 #[tauri::command]
@@ -84,6 +91,11 @@ fn check_add(req: &AddRequest) -> Result<(), String> {
     }
     if req.filename.trim().is_empty() {
         return Err("File name is empty".into());
+    }
+    if let Some(sum) = req.checksum.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if crate::checksum::Algo::from_hex(sum).is_none() {
+            return Err("Checksum must be 32 (MD5), 40 (SHA-1), 64 (SHA-256), or 128 (SHA-512) hex characters".into());
+        }
     }
     Ok(())
 }
@@ -105,7 +117,7 @@ mod tests {
         assert!(check_add(&req("https://example.com/a.iso", false)).is_ok());
         assert!(check_add(&req("magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c", true)).is_ok());
         assert!(check_add(&req("https://example.com/a.torrent", true)).is_ok());
-        let file = std::env::temp_dir().join("swiftdl-test.torrent");
+        let file = std::env::temp_dir().join("motlydl-test.torrent");
         std::fs::write(&file, b"d4:infod4:name1:aee").unwrap();
         assert!(check_add(&req(&file.to_string_lossy(), true)).is_ok(), "a .torrent file on disk");
         let _ = std::fs::remove_file(file);
@@ -116,6 +128,11 @@ mod tests {
         assert!(check_add(&req("magnet:?xt=urn:btih:abc", false)).is_err(), "magnet only as a torrent");
         assert!(check_add(&req("file:///etc/passwd", false)).is_err());
         assert!(check_add(&req("C:/not/there.torrent", true)).is_err());
+        let mut bad_sum = req("https://example.com/a.iso", false);
+        bad_sum.checksum = Some("not-hex".into());
+        assert!(check_add(&bad_sum).is_err());
+        bad_sum.checksum = Some("900150983cd24fb0d6963f7d28e17f72".into());
+        assert!(check_add(&bad_sum).is_ok());
     }
 }
 
@@ -143,7 +160,7 @@ pub fn open_file(m: Mgr, id: u64) -> Result<(), String> {
 #[tauri::command]
 pub fn open_folder(m: Mgr, id: u64) -> Result<(), String> {
     let item = m.item(id).ok_or("not found")?;
-    let target = if item.path.exists() { item.path.clone() } else { swiftdl_engine::part_path(&item.path) };
+    let target = if item.path.exists() { item.path.clone() } else { motlydl_engine::part_path(&item.path) };
     if target.exists() {
         m.app_handle().opener().reveal_item_in_dir(target).map_err(|e| e.to_string())
     } else {
@@ -257,7 +274,7 @@ pub async fn probe_media(m: Mgr<'_>, url: String, headers: Vec<(String, String)>
 
 /// A video-site link pasted into the main window: choose its quality in a
 /// "New download" window, like a link caught from the browser.
-/// Opens a link in the browser, marked so the SwiftDL extension lets the
+/// Opens a link in the browser, marked so the MotlyDL extension lets the
 /// browser keep the download (it carries your signed-in session).
 #[tauri::command]
 pub fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
@@ -265,7 +282,7 @@ pub fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<(), String>
     if !(base.starts_with("http://") || base.starts_with("https://")) {
         return Err("That isn't a web link".into());
     }
-    app.opener().open_url(format!("{base}#swiftdl-browser"), None::<&str>).map_err(|e| e.to_string())
+    app.opener().open_url(format!("{base}#motlydl-browser"), None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Site grabber: the links on one web page, for the user to pick from.
@@ -328,6 +345,18 @@ pub fn set_url(m: Mgr, id: u64, url: String) -> Result<(), String> {
     m.set_url(id, &url)
 }
 
+/// Opens the download's original page so the user can re-trigger an expired link;
+/// the next browser capture matching filename/size automatically resumes this download.
+#[tauri::command]
+pub fn start_refresh(m: Mgr, id: u64) -> Result<String, String> {
+    m.start_refresh(id)
+}
+
+#[tauri::command]
+pub fn cancel_refresh(m: Mgr) {
+    m.cancel_refresh();
+}
+
 /// Adds every link in pasted text (lists and `[01-50]` patterns). Returns how many.
 #[tauri::command]
 pub fn add_links(m: Mgr, text: String) -> usize {
@@ -336,7 +365,7 @@ pub fn add_links(m: Mgr, text: String) -> usize {
 
 #[tauri::command]
 pub fn open_new_download(m: Mgr, url: String) {
-    m.new_download_window(Incoming { url: url.trim().to_string(), filename: None, referrer: None, cookies: None, user_agent: None, qualities: None, pick: None });
+    m.new_download_window(Incoming { url: url.trim().to_string(), ..Default::default() });
 }
 
 #[tauri::command]

@@ -1,21 +1,21 @@
-// SwiftDL page helper.
+// MotlyDL page helper.
 // - Shows a "Download video" button over video players. Clicking it lists
-//   the media files the page loaded and sends the chosen one to SwiftDL.
+//   the media files the page loaded and sends the chosen one to MotlyDL.
 // - Alt+click on a link tells the background to let the browser handle
 //   that one download itself.
 // Everything lives in a closed shadow root so page styles can't touch it.
 
 (() => {
-  if (window.__swiftdlLoaded) return;
-  window.__swiftdlLoaded = true;
+  if (window.__motlydlLoaded) return;
+  window.__motlydlLoaded = true;
 
-  // Alt+click: skip SwiftDL for this download.
+  // Alt+click: skip MotlyDL for this download.
   document.addEventListener("click", (e) => {
     if (e.altKey && e.target.closest?.("a[href]")) chrome.runtime.sendMessage({ type: "bypass" }).catch(() => {});
   }, true);
 
   // Magnet links aren't downloads, so the browser would hand them to another
-  // app. Send them to SwiftDL; if it can't take them, open the link as usual.
+  // app. Send them to MotlyDL; if it can't take them, open the link as usual.
   document.addEventListener("click", async (e) => {
     const a = e.target.closest?.('a[href^="magnet:"]');
     if (!a || e.altKey || e.button !== 0 || e.defaultPrevented) return;
@@ -27,16 +27,16 @@
   }, true);
 
   const MIN_W = 200, MIN_H = 112;
-  // Video sites SwiftDL downloads through yt-dlp: the page itself is sent,
-  // and the quality is chosen in SwiftDL.
+  // Video sites MotlyDL downloads through yt-dlp: the page itself is sent,
+  // and the quality is chosen in MotlyDL.
   const VIDEO_SITE = /(^|\.)(youtube\.com|youtube-nocookie\.com|vimeo\.com|x\.com|twitter\.com|reddit\.com|instagram\.com|tiktok\.com|facebook\.com|twitch\.tv|dailymotion\.com|bilibili\.com)$/i;
   const onVideoSite = () => VIDEO_SITE.test(location.hostname);
-  const LOGO = `<svg viewBox="0 0 64 64" width="16" height="16" aria-hidden="true"><rect width="64" height="64" rx="14.5" fill="#24262b"/><g fill="#fff" transform="translate(13 13) scale(1.1875)"><rect x="4.5" y="3" width="4.4" height="12" rx="2.2"/><rect x="10.9" y="3" width="4.4" height="17" rx="2.2"/><rect x="16.7" y="3" width="4.4" height="17" rx="2.2"/><rect x="23.1" y="3" width="4.4" height="12" rx="2.2"/><path d="M6 21.5 16 28l10-6.5" fill="none" stroke="#fff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/></g></svg>`;
+  const LOGO = `<svg viewBox="0 0 64 64" width="16" height="16" aria-hidden="true"><defs><linearGradient id="mg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e1b4b"/><stop offset=".55" stop-color="#0f172a"/><stop offset="1" stop-color="#090d16"/></linearGradient><linearGradient id="mc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs><rect width="64" height="64" rx="14.5" fill="url(#mg)"/><g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(13 13) scale(1.1875)"><path d="M5.6 21.4V5.8l4.8 5M26.4 21.4V5.8l-4.8 5" stroke="#f8fafc" stroke-width="4.2"/><path d="M16 4.8v15.4M11 16.4l5 4.8 5-4.8" stroke="url(#mc)" stroke-width="3.6"/><path d="M5.8 27.2h20.4" stroke="#f8fafc" stroke-width="3.6"/></g></svg>`;
 
   let host, root, wrap, btn, panel, video = null, hideTimer = 0, raf = 0, open = false;
 
   function build() {
-    host = document.createElement("swiftdl-overlay");
+    host = document.createElement("motlydl-overlay");
     host.style.cssText = "all:initial;position:fixed;inset:0 auto auto 0;width:0;height:0;z-index:2147483647;";
     root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `<style>
@@ -83,7 +83,7 @@
       .panel:not(.note) .msg { padding: 8px 8px 10px; color: #a4a8b1; }
       .msg.err { color: #f0b3ae; }
     </style>
-    <div class="wrap"><button class="btn" title="Download with SwiftDL">${LOGO}<span>Download video</span><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg><svg class="tick" width="11" height="11" viewBox="0 0 12 12"><path d="M2.4 6.3l2.4 2.4 4.8-5.2" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="panel"></div></div>`;
+    <div class="wrap"><button class="btn" title="Download with MotlyDL">${LOGO}<span>Download video</span><svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5l3 3 3-3" stroke="#fff" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg><svg class="tick" width="11" height="11" viewBox="0 0 12 12"><path d="M2.4 6.3l2.4 2.4 4.8-5.2" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="panel"></div></div>`;
     wrap = root.querySelector(".wrap");
     btn = root.querySelector(".btn");
     panel = root.querySelector(".panel");
@@ -115,6 +115,13 @@
     if (host && host.parentNode !== parent) parent.append(host);
   }
   document.addEventListener("fullscreenchange", () => host && mount());
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    } else if (video && wrap?.classList.contains("on") && !raf) {
+      raf = requestAnimationFrame(position);
+    }
+  });
 
   const bytes = (n) => {
     if (!n) return "";
@@ -126,7 +133,7 @@
   const title = () => (document.title || "video").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
 
   function position() {
-    if (!video || !wrap.classList.contains("on")) { raf = 0; return; }
+    if (!video || document.hidden || !wrap.classList.contains("on")) { raf = 0; return; }
     const r = video.getBoundingClientRect();
     if (r.width < MIN_W || r.height < MIN_H || r.bottom < 0 || r.top > innerHeight) { hide(); raf = 0; return; }
     wrap.style.left = `${Math.min(innerWidth - 8, r.right - 10)}px`;
@@ -164,7 +171,7 @@
     wrap.classList.add("on");
     if (!raf) raf = requestAnimationFrame(position);
   }
-  function hide() { clearTimeout(prepTimer); prepTimer = 0; wrap?.classList.remove("on"); setOpen(false); video = null; }
+  function hide() { clearTimeout(prepTimer); prepTimer = 0; if (raf) { cancelAnimationFrame(raf); raf = 0; } wrap?.classList.remove("on"); setOpen(false); video = null; }
   function scheduleHide() { clearTimeout(hideTimer); if (!open) hideTimer = setTimeout(hide, 1600); }
   function setOpen(v) { open = v; wrap?.classList.toggle("open", v); }
 
@@ -199,7 +206,7 @@
     if (src && /^https?:/i.test(src) && !items.some((m) => m.url === src)) items.unshift({ url: src, kind: "file", mime: "video/mp4", size: 0 });
     const files = items.filter((m) => m.kind === "file");
     // A player loads its main playlist first, then one per quality: the
-    // oldest stream is the main one, which lets SwiftDL offer every quality.
+    // oldest stream is the main one, which lets MotlyDL offer every quality.
     const stream = pickStream(items);
     const name = title();
     let html = "";
@@ -212,30 +219,30 @@
       }).join("");
     }
     if (stream) {
-      html += `<div class="head">Stream</div><button class="item" data-url="${encodeURI(stream.url).replace(/"/g, "%22")}" data-name="${name.replace(/"/g, "'")}.mp4"><span class="tag stream">${stream.kind.toUpperCase()}</span><span class="meta"><b>This video</b><span>Choose the quality in SwiftDL</span></span></button>`;
+      html += `<div class="head">Stream</div><button class="item" data-url="${encodeURI(stream.url).replace(/"/g, "%22")}" data-name="${name.replace(/"/g, "'")}.mp4"><span class="tag stream">${stream.kind.toUpperCase()}</span><span class="meta"><b>This video</b><span>Choose the quality in MotlyDL</span></span></button>`;
     }
     if (!files.length && !stream) html = `<div class="msg">No downloadable file found yet. Play the video for a moment, then try again.</div>`;
     panel.classList.remove("note");
     panel.innerHTML = html;
   }
 
-  // Say what actually went wrong. The commonest case isn't SwiftDL at all:
+  // Say what actually went wrong. The commonest case isn't MotlyDL at all:
   // the extension was updated or reloaded, which cuts off pages that were
   // already open until they're reloaded.
   function failure(error) {
     const text = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-    if (/context invalidated|receiving end does not exist/i.test(error) || !chrome.runtime?.id) return "SwiftDL's extension was updated. Reload this page and try again.";
-    if (/host not found|not allowed/i.test(error)) return "SwiftDL isn't set up in this browser yet. Open the SwiftDL app once, then try again.";
-    return `SwiftDL couldn't take this download: ${text(error) || "no answer from the app"}.`;
+    if (/context invalidated|receiving end does not exist/i.test(error) || !chrome.runtime?.id) return "MotlyDL's extension was updated. Reload this page and try again.";
+    if (/host not found|not allowed/i.test(error)) return "MotlyDL isn't set up in this browser yet. Open the MotlyDL app once, then try again.";
+    return `MotlyDL couldn't take this download: ${text(error) || "no answer from the app"}.`;
   }
 
   // ---------- YouTube: qualities straight from the page ----------
   // yt.js (inside the page) reads what the player already has. Same choices
   // and format selectors as the app's own lookup, so either way matches.
   const askPage = () => new Promise((resolve) => {
-    const on = (e) => { if (e.source === window && e.data?.swiftdl === "yt-info") { removeEventListener("message", on); resolve(e.data); } };
+    const on = (e) => { if (e.source === window && e.data?.motlydl === "yt-info") { removeEventListener("message", on); resolve(e.data); } };
     addEventListener("message", on);
-    postMessage({ swiftdl: "yt-ask" }, "*");
+    postMessage({ motlydl: "yt-ask" }, "*");
     setTimeout(() => { removeEventListener("message", on); resolve(null); }, 800);
   });
   function ytQualities(formats) {
@@ -322,6 +329,7 @@
     const now = performance.now();
     if (now - last < 120) return;
     last = now;
+    if (!video && document.getElementsByTagName("video").length === 0) return;
     if (host && e.composedPath().includes(host)) return;
     const v = document.elementsFromPoint(e.clientX, e.clientY).find((el) => el.tagName === "VIDEO");
     if (v) {

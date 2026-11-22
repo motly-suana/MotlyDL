@@ -1,4 +1,4 @@
-/* SwiftDL site. Dark, quiet and precise: a near-black page with a faint dot
+/* MotlyDL site. Dark, quiet and precise: a near-black page with a faint dot
    grid, thin guide lines framing the content, two-tone headings, and live
    mockups of the app on textured backdrops. Tailwind handles layout; this
    file holds the tokens and the pieces every page shares. */
@@ -101,7 +101,7 @@ body {
 }
 .stage::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); }
 
-/* The segment strip: SwiftDL's motif, a file split into parts that fill
+/* The segment strip: MotlyDL's motif, a file split into parts that fill
    in one after another. Used as a section divider. */
 .strip { display: grid; grid-template-columns: repeat(48, 1fr); gap: 4px; height: 6px; }
 .strip i { background: rgba(255, 255, 255, .06); border-radius: 1px; transition: background .3s; }

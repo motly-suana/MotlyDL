@@ -1,10 +1,10 @@
-// SwiftDL main window. Talks to the Rust backend through api.ts; opened
+// MotlyDL main window. Talks to the Rust backend through api.ts; opened
 // in a normal browser, mock.ts stands in for the backend.
 
 import "./styles.css";
 import { invoke, listen, currentWindow, $ } from "./api";
 import type { Item, Settings, IntegrationStatus, BrowserStatus, Incoming, ProbeInfo, Header, Status, Commands, UpdateInfo } from "./api";
-import { icon, CATS, catOf, parts, bytes, speed, dur, when, esc, host, segBar } from "./util";
+import { icon, CATS, catOf, checksumAlgo, parts, bytes, speed, dur, when, esc, host, segBar } from "./util";
 
 const appWindow = currentWindow();
 const target = (e: Event) => e.target as HTMLElement;
@@ -264,11 +264,12 @@ function renderInspector() {
 
   $("ins-pct").textContent = it.size ? `${Math.floor(pct(it))}%` : "";
   const bar = $("ins-bar");
+  const media = !!it.format || Array.isArray(it.torrentFiles);
   bar.className = `segbar ${it.status}`;
-  segBar(bar, null, undefined, pct(it));
+  segBar(bar, !media ? it.size : null, !media ? it.segments : undefined, pct(it));
   const row = (k: string, v: string) => `<dt>${k}</dt><dd><span>${v}</span></dd>`;
   const stats = it.status === "completed"
-    ? row("Size", bytes(it.size)) + row("Finished", when(it.completedAt) || "—") + (it.verified ? row("Checksum", "SHA-256 matches") : "")
+    ? row("Size", bytes(it.size)) + row("Finished", when(it.completedAt) || "—") + (it.verified ? row("Checksum", `${checksumAlgo(it.checksum) || "Checksum"} matches`) : "")
     : row("Downloaded", it.size ? `${bytes(it.downloaded)} of ${bytes(it.size)}` : bytes(it.downloaded)) +
       (dl && !finishing ? row("Speed", speed(it.speed)) + row("Time left", dur(eta(it))) : "") +
       (dl && it.connections ? row("Connections", String(it.connections)) : "");
@@ -287,8 +288,9 @@ function renderInspector() {
     ${it.error ? `<dt>Error</dt><dd><span style="color:var(--red)" title="${esc(it.error)}">${esc(it.error)}</span></dd>` : ""}`;
   if ($("ins-props").innerHTML !== props) $("ins-props").innerHTML = props;
 
+  const expired = it.status === "error" && !media && /\b(401|403|410)\b|web page|expired/i.test(it.error || "");
   const primary = it.status === "completed" ? `<button class="btn primary" data-ins="open">Open</button>`
-    : it.status === "error" ? `<button class="btn" data-ins="browser" title="Open the link in your browser, which downloads it with your own session">Download in browser</button><button class="btn primary" data-ins="resume">Retry</button>`
+    : it.status === "error" ? `${expired ? `<button class="btn" data-ins="refresh" title="Open the source page to capture a fresh link and keep downloaded parts">Refresh address</button>` : ""}<button class="btn" data-ins="browser" title="Open the link in your browser, which downloads it with your own session">Download in browser</button><button class="btn primary" data-ins="resume">Retry</button>`
     : isActive(it) ? `<button class="btn" data-ins="pause">Pause</button>`
     : `<button class="btn primary" data-ins="resume">Resume</button>`;
   const foot = `<button class="btn" data-ins="folder">Show in folder</button>${primary}<button class="btn icon" data-ins="more" title="More">${icon("more")}</button>`;
@@ -340,7 +342,7 @@ async function openExtensionGuide(browserId?: string) {
   if (browserId === "firefox" || (i?.storeAvailable && browserId)) return openStore(browserId);
   const dir = await invoke("extension_dir").catch(() => null);
   const ff = browserId === "firefox";
-  const path = (dir || "%LOCALAPPDATA%\\SwiftDL\\extension") + (ff ? "-firefox" : "");
+  const path = (dir || "%LOCALAPPDATA%\\MotlyDL\\extension") + (ff ? "-firefox" : "");
   $("ext-path").textContent = path;
   $("ext-path").title = path;
   const b = installedBrowsers().find((x) => x.id === browserId);
@@ -356,7 +358,7 @@ async function openExtensionGuide(browserId?: string) {
   clearInterval(guidePoll);
   guidePoll = window.setInterval(() => {
     if (!$("dlg-ext").open) return clearInterval(guidePoll);
-    loadIntegration();
+    if (!document.hidden) loadIntegration();
   }, 1500);
 }
 async function openExtPage(id: string) {
@@ -447,7 +449,7 @@ function askDelete(it: Item | null | undefined) {
   const dlg = $("dlg-delete");
   const live = it.status !== "completed";
   $("del-title").textContent = live ? "Cancel this download?" : "Remove from list?";
-  $("del-text").textContent = live ? `“${it.filename}” will stop and its partial data will be deleted.` : `“${it.filename}” will be removed from SwiftDL.`;
+  $("del-text").textContent = live ? `“${it.filename}” will stop and its partial data will be deleted.` : `“${it.filename}” will be removed from MotlyDL.`;
   $("del-ok").textContent = live ? "Cancel download" : "Remove";
   $("del-files").checked = false;
   $("del-files-row").hidden = live;
@@ -470,7 +472,7 @@ function askDeleteMany(items: Item[]) {
   const dlg = $("dlg-delete");
   const live = items.filter((i) => i.status !== "completed").length;
   $("del-title").textContent = `Remove ${items.length} downloads?`;
-  $("del-text").textContent = live ? `${live} still running or waiting will stop and their partial data will be deleted. The rest will be removed from SwiftDL.` : `${items.length} downloads will be removed from SwiftDL.`;
+  $("del-text").textContent = live ? `${live} still running or waiting will stop and their partial data will be deleted. The rest will be removed from MotlyDL.` : `${items.length} downloads will be removed from MotlyDL.`;
   $("del-ok").textContent = `Remove ${items.length}`;
   $("del-files").checked = false;
   $("del-files-row").hidden = live === items.length;
@@ -501,6 +503,7 @@ function act(name: string, it: Item | null | undefined, anchor?: HTMLElement) {
     case "pause": return pause([it.id]);
     case "resume": return resume([it.id]);
     case "browser": return void call("open_in_browser", { url: it.url });
+    case "refresh": return void refreshAddress(it);
     case "copy": return void copy(it.url, "Link copied");
     case "copy-path": return void copy(it.path, "Path copied");
     case "delete": return askDelete(it);
@@ -544,7 +547,16 @@ async function replaceLink(it: Item) {
   try { await invoke("set_url", { id: it.id, url }); toast("Link replaced, resuming", "ok"); }
   catch (e) { toast(esc(String(e)), "err"); }
 }
+async function refreshAddress(it: Item) {
+  try {
+    await invoke("start_refresh", { id: it.id });
+    toast("Opened source page — start the download again to resume", "info");
+  } catch (e) {
+    toast(esc(String(e)), "err");
+  }
+}
 function itemMenu(it: Item, x: number, y: number, above = false) {
+  const regular = !it.format && !Array.isArray(it.torrentFiles);
   showMenu(x, y, [
     { icon: "open", label: "Open", keys: ["Enter"], enabled: it.status === "completed", run: () => act("open", it) },
     { icon: "folder", label: "Show in folder", keys: ["O"], run: () => act("folder", it) },
@@ -552,8 +564,9 @@ function itemMenu(it: Item, x: number, y: number, above = false) {
     isActive(it) ? { icon: "pause", label: "Pause", keys: ["Space"], run: () => pause([it.id]) }
       : { icon: it.status === "error" ? "retry" : "play", label: it.status === "error" ? "Retry" : "Resume", keys: ["Space"], enabled: it.status !== "completed", run: () => resume([it.id]) },
     { icon: "play", label: "Download next", enabled: it.status === "queued", run: () => downloadNext(it) },
+    { icon: "retry", label: "Refresh address", enabled: regular && (it.status === "error" || it.status === "paused"), run: () => refreshAddress(it) },
     { icon: "open", label: "Download in browser", enabled: it.status === "error", run: () => act("browser", it) },
-    { icon: "link", label: "Replace link from clipboard", enabled: it.status === "error" || it.status === "paused", run: () => replaceLink(it) },
+    { icon: "link", label: "Replace link from clipboard", enabled: regular && (it.status === "error" || it.status === "paused"), run: () => replaceLink(it) },
     { icon: "link", label: "Copy link", keys: ["C"], run: () => act("copy", it) },
     "-",
     { icon: "trash", label: it.status === "completed" ? "Remove…" : "Cancel download…", keys: ["Del"], danger: true, run: () => askDelete(it) },
@@ -739,6 +752,25 @@ $("dlg-palette").addEventListener("click", (e) => { if (e.target === $("dlg-pale
 const add: { headers: Header[]; seq: number; timer: number; dirTouched: boolean; dir: string; info: ProbeInfo | null; suggest: string } =
   { headers: [], seq: 0, timer: 0, dirTouched: false, dir: "", info: null, suggest: "" };
 interface ComposerInput { url: string; headers?: Header[]; filename?: string | null }
+let addSumEdited = false;
+function validateAddSum(showErr: boolean) {
+  const inp = $("add-sum"), errEl = $("add-sum-err"), raw = inp.value.trim();
+  const ok = !raw || !!checksumAlgo(raw);
+  if (!ok && showErr) {
+    inp.setAttribute("aria-invalid", "true");
+    inp.setAttribute("aria-describedby", "add-sum-err");
+    errEl.textContent = "Enter 32 (MD5), 40 (SHA-1), 64 (SHA-256), or 128 (SHA-512) hex characters.";
+    errEl.hidden = false;
+  } else if (ok) {
+    inp.setAttribute("aria-invalid", "false");
+    inp.removeAttribute("aria-describedby");
+    errEl.hidden = true;
+  }
+  return ok;
+}
+$("add-sum").addEventListener("input", () => { addSumEdited = true; validateAddSum(false); });
+$("add-sum").addEventListener("blur", () => { if (addSumEdited) validateAddSum(true); });
+
 function openComposer(incoming?: ComposerInput) {
   const dlg = $("dlg-add");
   if (dlg.open) return;
@@ -747,8 +779,12 @@ function openComposer(incoming?: ComposerInput) {
   add.dirTouched = false;
   add.info = null;
   add.dir = state.settings?.downloadDir || "";
+  addSumEdited = false;
   $("add-url").value = incoming?.url || "";
+  $("add-sum").value = "";
+  validateAddSum(false);
   $("add-file").hidden = true;
+  $("add-sum-row").hidden = true;
   renderChips();
   setState("idle");
   dlg.showModal();
@@ -756,7 +792,7 @@ function openComposer(incoming?: ComposerInput) {
   if (incoming?.url) probe();
   else readClip().then((u) => { if (u && !$("add-url").value) { $("add-url").value = u; $("add-url").select(); probe(); } });
 }
-// Opt-in: switching back to SwiftDL after copying a download link offers to download it.
+// Opt-in: switching back to MotlyDL after copying a download link offers to download it.
 let lastClip = "";
 window.addEventListener("focus", async () => {
   if (!state.settings?.watchClipboard || $("dlg-add").open || $("dlg-settings").open) return;
@@ -771,7 +807,7 @@ const readClip = (): Promise<string | undefined> => (navigator.clipboard?.readTe
 function setState(kind: "idle" | "loading" | "error" | "done", msg = "") {
   const el = $("add-state");
   el.className = `comp-state ${kind === "error" ? "err" : ""}`;
-  el.innerHTML = kind === "loading" ? `<span class="spinner"></span>Fetching file details…` : kind === "error" ? `${icon("alert")}${esc(msg)}` : kind === "idle" ? `SwiftDL checks the file's name and size before downloading.` : "";
+  el.innerHTML = kind === "loading" ? `<span class="spinner"></span>Fetching file details…` : kind === "error" ? `${icon("alert")}${esc(msg)}` : kind === "idle" ? `MotlyDL checks the file's name and size before downloading.` : "";
   el.hidden = kind === "done";
   $("add-start").disabled = $("add-later").disabled = kind !== "done";
 }
@@ -787,7 +823,7 @@ function renderChips() {
 }
 async function probe() {
   const url = $("add-url").value.trim();
-  if (!/^(https?:\/\/|ftp:\/\/|magnet:\?)\S+/i.test(url)) { add.info = null; $("add-file").hidden = true; renderChips(); if (url) setState("error", "Paste a web link (http://, https:// or ftp://) or a magnet link"); else setState("idle"); return; }
+  if (!/^(https?:\/\/|ftp:\/\/|magnet:\?)\S+/i.test(url)) { add.info = null; $("add-file").hidden = true; $("add-sum-row").hidden = true; renderChips(); if (url) setState("error", "Paste a web link (http://, https:// or ftp://) or a magnet link"); else setState("idle"); return; }
   // A playlist page: choose which videos, and video or audio.
   if (await invoke("is_playlist_url", { url }).catch(() => false)) {
     $("dlg-add").close();
@@ -824,11 +860,12 @@ async function probe() {
     $("add-tile").innerHTML = ftile(info);
     $("add-sub").textContent = host(url);
     $("add-file").hidden = false;
+    $("add-sum-row").hidden = false;
     renderChips();
     setState("done");
   } catch (e) {
     if (seq !== add.seq) return;
-    add.info = null; $("add-file").hidden = true; renderChips();
+    add.info = null; $("add-file").hidden = true; $("add-sum-row").hidden = true; renderChips();
     setState("error", `Couldn't reach that link: ${e}`);
   }
 }
@@ -872,17 +909,44 @@ $("pl-go").onclick = async () => {
 
 // ---------- find files on a page ----------
 type Found = { url: string; name: string };
-const grab = { all: [] as Found[], picked: new Set<string>(), cat: "File", q: "" };
+const grab = { all: [] as Found[], picked: new Set<string>(), cat: "File", q: "", ext: "" };
 const looksLikeFile = (n: string) => /\.[a-z0-9]{2,5}$/i.test(n) && !/\.(html?|php|aspx?|jsp|js|css|json|xml|map)$/i.test(n);
-function grabVisible(): Found[] {
+const extLower = (n: string) => (/\.([a-z0-9]{1,5})$/i.exec(n || "") || [])[1]?.toLowerCase() || "";
+function matchPattern(f: Found, raw: string): boolean {
+  const q = raw.trim().toLowerCase();
+  if (!q) return true;
+  if (q.startsWith(".")) return f.name.toLowerCase().endsWith(q);
+  if (q.includes("*") || q.includes("?")) {
+    const re = new RegExp("^" + q.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$", "i");
+    return re.test(f.name) || re.test(f.url);
+  }
+  return f.name.toLowerCase().includes(q) || f.url.toLowerCase().includes(q);
+}
+function grabBaseVisible(): Found[] {
   return grab.all.filter((f) => (grab.cat === "File" ? looksLikeFile(f.name) : grab.cat === "All" ? true : looksLikeFile(f.name) && catOf(f.name) === grab.cat));
 }
+function grabVisible(): Found[] {
+  return grabBaseVisible().filter((f) => (!grab.ext || extLower(f.name) === grab.ext) && matchPattern(f, grab.q));
+}
 function renderGrab() {
+  const base = grabBaseVisible();
   const list = grabVisible();
   const cats = ["File", ...Object.keys(CATS).filter((c) => c !== "Other" && grab.all.some((f) => looksLikeFile(f.name) && catOf(f.name) === c)), "All"];
   $("grab-chips").innerHTML = cats.map((c) => `<button type="button" class="chip${c === grab.cat ? " on" : ""}" data-c="${c}"><span>${c === "File" ? "All files" : c === "All" ? "Every link" : c}</span></button>`).join("");
-  $("grab-list").innerHTML = list.map((f) => `<label class="grab-row"><input type="checkbox" data-u="${esc(f.url)}"${grab.picked.has(f.url) ? " checked" : ""}><span class="gn" title="${esc(f.url)}">${esc(f.name || f.url)}</span><span class="gh">${esc(host(f.url))}</span></label>`).join("") || `<p class="muted" style="padding:10px 12px">Nothing here.</p>`;
+  const extCounts = new Map<string, number>();
+  for (const f of base) {
+    const e = extLower(f.name);
+    if (e && looksLikeFile(f.name)) extCounts.set(e, (extCounts.get(e) || 0) + 1);
+  }
+  const exts = [...extCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  $("grab-exts").innerHTML = exts.length > 1
+    ? exts.map(([e, n]) => `<button type="button" class="chip${grab.ext === e ? " on" : ""}" data-ext="${e}"><span>.${esc(e)} (${n})</span></button>`).join("")
+    : "";
+  $("grab-list").innerHTML = list.map((f) => `<label class="grab-row"><input type="checkbox" data-u="${esc(f.url)}"${grab.picked.has(f.url) ? " checked" : ""}><span class="gn" title="${esc(f.url)}">${esc(f.name || f.url)}</span><span class="gh">${esc(host(f.url))}</span></label>`).join("") || `<p class="muted" style="padding:10px 12px">Nothing matches this filter.</p>`;
   const n = grab.picked.size;
+  if (grab.all.length) {
+    $("grab-state").textContent = `Showing ${list.length} of ${grab.all.length} link${grab.all.length === 1 ? "" : "s"}${n ? ` · ${n} selected` : ""}`;
+  }
   $("grab-go").disabled = !n;
   $("grab-go").textContent = n ? `Download ${n} file${n === 1 ? "" : "s"}` : "Download";
   $("grab-all").textContent = list.length && list.every((f) => grab.picked.has(f.url)) ? "Select none" : "Select all";
@@ -894,7 +958,7 @@ async function loadGrab() {
   try {
     grab.all = await invoke("grab_page", { url });
     grab.picked.clear();
-    $("grab-state").textContent = grab.all.length ? `${grabVisible().length} files on this page` : "No links found on this page";
+    grab.ext = "";
     renderGrab();
   } catch (e) { $("grab-state").textContent = `Couldn't read that page: ${e}`; }
 }
@@ -902,7 +966,7 @@ $("add-grab").onclick = () => {
   const url = $("add-url").value.trim();
   $("dlg-add").close();
   $("grab-url").value = /^https?:\/\//i.test(url) ? url : "";
-  grab.all = []; grab.picked.clear(); grab.cat = "File"; $("grab-state").textContent = ""; renderGrab();
+  grab.all = []; grab.picked.clear(); grab.cat = "File"; grab.q = ""; grab.ext = ""; $("grab-q").value = ""; $("grab-state").textContent = ""; renderGrab();
   $("dlg-grab").showModal();
   $("grab-url").focus();
   if ($("grab-url").value) loadGrab();
@@ -910,9 +974,12 @@ $("add-grab").onclick = () => {
 $("grab-x").onclick = () => $("dlg-grab").close();
 $("grab-url").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); loadGrab(); } });
 $("grab-url").addEventListener("paste", () => setTimeout(loadGrab, 50));
-$("grab-chips").addEventListener("click", (e) => { const b = target(e).closest<HTMLElement>("[data-c]"); if (b) { grab.cat = b.dataset.c!; renderGrab(); } });
+$("grab-q").addEventListener("input", () => { grab.q = $("grab-q").value; renderGrab(); });
+$("grab-chips").addEventListener("click", (e) => { const b = target(e).closest<HTMLElement>("[data-c]"); if (b) { grab.cat = b.dataset.c!; grab.ext = ""; renderGrab(); } });
+$("grab-exts").addEventListener("click", (e) => { const b = target(e).closest<HTMLElement>("[data-ext]"); if (b) { grab.ext = grab.ext === b.dataset.ext! ? "" : b.dataset.ext!; renderGrab(); } });
 $("grab-list").addEventListener("change", (e) => { const i = target(e) as HTMLInputElement; if (i.dataset.u) { i.checked ? grab.picked.add(i.dataset.u) : grab.picked.delete(i.dataset.u); renderGrab(); } });
 $("grab-all").onclick = () => { const list = grabVisible(); const all = list.every((f) => grab.picked.has(f.url)); list.forEach((f) => (all ? grab.picked.delete(f.url) : grab.picked.add(f.url))); renderGrab(); };
+$("grab-invert").onclick = () => { for (const f of grabVisible()) { if (grab.picked.has(f.url)) grab.picked.delete(f.url); else grab.picked.add(f.url); } renderGrab(); };
 $("grab-go").onclick = async () => {
   const n = await invoke("add_links", { text: [...grab.picked].join("\n") }).catch(() => 0);
   $("dlg-grab").close();
@@ -946,7 +1013,20 @@ $("dlg-add").addEventListener("close", () => { add.seq++; setTimeout(nextPending
 async function submitAdd(start: boolean) {
   const filename = $("add-filename").value.trim();
   if (!filename) return;
-  const id = await call("add_download", { req: { url: $("add-url").value.trim(), filename, dir: add.dir || settings().downloadDir, headers: add.headers, start } });
+  if (!validateAddSum(true)) { $("add-sum").focus(); return; }
+  const sum = $("add-sum").value.trim().toLowerCase();
+  const id = await call("add_download", {
+    req: {
+      url: $("add-url").value.trim(),
+      filename,
+      dir: add.dir || settings().downloadDir,
+      headers: add.headers,
+      start,
+      checksum: sum || null,
+      category: add.info?.category || null,
+      contentType: add.info?.contentType || null,
+    },
+  });
   $("dlg-add").close();
   if (state.view !== "all" && state.view !== "active") state.view = "all";
   select(id);
@@ -981,7 +1061,30 @@ function renderScale() { $("set-scale").querySelectorAll<HTMLElement>("[data-v]"
 $("set-scale").addEventListener("click", (e) => { const b = target(e).closest<HTMLElement>("[data-v]"); if (b) { setScale = Number(b.dataset.v); renderScale(); applyScale(setScale); } });
 function renderDebridProvider() { $("set-debrid-provider").querySelectorAll<HTMLElement>("[data-v]").forEach((b) => b.classList.toggle("on", b.dataset.v === setDebridProvider)); }
 $("set-debrid-provider").addEventListener("click", (e) => { const b = target(e).closest<HTMLElement>("[data-v]"); if (b) { setDebridProvider = b.dataset.v!; renderDebridProvider(); } });
-let setDir = "", setLimitKib = 0, setThemeChoice = "system", setSeed = "stop", setWhenDone = "nothing", setStartAt = 0;
+let setDir = "", setLimitKib = 0, setThemeChoice = "system", setSeed = "stop", setWhenDone = "nothing", setStartAt = 0, setStopAt = 0;
+let setCatDirs: Record<string, string> = {};
+function renderCatDirs() {
+  $("set-cat-dirs").innerHTML = Object.keys(CATS).map((c) => {
+    const custom = setCatDirs[c] || "";
+    const fallback = $("set-sort").checked && c !== "Other" ? `Default (${c} subfolder)` : "Default download folder";
+    return `<div class="cat-dir-row"><b>${esc(c)}</b><span title="${esc(custom || fallback)}">${esc(custom || fallback)}</span>${custom ? `<button type="button" class="btn sm" data-cat-reset="${esc(c)}">Reset</button>` : ""}<button type="button" class="btn sm" data-cat-pick="${esc(c)}">Change…</button></div>`;
+  }).join("");
+}
+$("set-cat-dirs").addEventListener("click", async (e) => {
+  const pick = target(e).closest<HTMLElement>("[data-cat-pick]");
+  if (pick) {
+    const c = pick.dataset.catPick!;
+    const d = await call("pick_folder", { start: setCatDirs[c] || setDir || null });
+    if (d) { setCatDirs[c] = d; renderCatDirs(); }
+    return;
+  }
+  const reset = target(e).closest<HTMLElement>("[data-cat-reset]");
+  if (reset) {
+    delete setCatDirs[reset.dataset.catReset!];
+    renderCatDirs();
+  }
+});
+$("set-sort").addEventListener("change", renderCatDirs);
 function renderWhenDone() {
   $("set-whendone").querySelectorAll<HTMLElement>("[data-v]").forEach((b) => b.classList.toggle("on", b.dataset.v === setWhenDone));
 }
@@ -1000,6 +1103,13 @@ function renderStartAt() {
 }
 $("set-startat").addEventListener("change", () => { setStartAt = $("set-startat").value ? nextTime($("set-startat").value) : 0; renderStartAt(); });
 $("set-startat-clear").addEventListener("click", () => { setStartAt = 0; renderStartAt(); });
+function renderStopAt() {
+  const on = setStopAt > Date.now();
+  $("set-stopat").value = on ? new Date(setStopAt).toTimeString().slice(0, 5) : "";
+  $("set-stopat-hint").textContent = on ? `Queue pauses at ${new Date(setStopAt).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "Running downloads pause at this time, once";
+}
+$("set-stopat").addEventListener("change", () => { setStopAt = $("set-stopat").value ? nextTime($("set-stopat").value) : 0; renderStopAt(); });
+$("set-stopat-clear").addEventListener("click", () => { setStopAt = 0; renderStopAt(); });
 function renderSeed() {
   $("set-seed").querySelectorAll<HTMLElement>("[data-v]").forEach((b) => b.classList.toggle("on", b.dataset.v === setSeed));
 }
@@ -1028,8 +1138,12 @@ function openSettings(tab = "general") {
   renderWhenDone();
   setStartAt = s.startAt || 0;
   renderStartAt();
+  setStopAt = s.stopAt || 0;
+  renderStopAt();
   setDir = s.downloadDir; $("set-dir").textContent = setDir;
   $("set-sort").checked = s.sortIntoCategories;
+  setCatDirs = { ...(s.categoryDirs || {}) };
+  renderCatDirs();
   $("set-ask").checked = s.askBeforeDownload;
   $("set-notify").checked = s.notifyOnComplete;
   $("set-clip").checked = s.watchClipboard;
@@ -1113,23 +1227,32 @@ $("form-settings").addEventListener("submit", async (e) => {
     seedUntil: setSeed,
     whenDone: setWhenDone,
     startAt: setStartAt,
+    stopAt: setStopAt,
+    categoryDirs: { ...setCatDirs },
   });
   $("dlg-settings").close();
   toast("Settings saved", "ok");
 });
 
 // ---------- data ----------
+let graphFlat = true;
 function ingest(items: Item[]) {
   state.items = items;
   let total = 0;
+  const activeIds = new Set<number>();
   for (const it of items) {
     if (it.status !== "downloading") continue;
+    activeIds.add(it.id);
     const h = state.speedHist.get(it.id) || [];
     h.push(it.speed || 0);
     if (h.length > HISTORY) h.shift();
     state.speedHist.set(it.id, h);
     total += it.speed || 0;
   }
+  for (const id of state.speedHist.keys()) {
+    if (!activeIds.has(id)) state.speedHist.delete(id);
+  }
+  if (total > 0 || activeIds.size > 0) graphFlat = false;
   state.totalHist.push(total);
   if (state.totalHist.length > HISTORY) state.totalHist.shift();
   render();
@@ -1137,7 +1260,7 @@ function ingest(items: Item[]) {
 // Updates: check a few seconds after start, then twice a day. A dismissed
 // version stays quiet; the next one shows again.
 let update: UpdateInfo | null = null;
-const SKIP_KEY = "swiftdl.skipUpdate";
+const SKIP_KEY = "motlydl.skipUpdate";
 function renderUpdate(busy = false) {
   const card = $("update");
   let skipped = "";
@@ -1146,7 +1269,7 @@ function renderUpdate(busy = false) {
   if (card.hidden || !update) return;
   const install = update.asset ? (update.asset.endsWith(".exe") ? "Install and restart" : "Download") : "Get it";
   card.innerHTML = `<span class="ob-icon">${icon("download")}</span>
-    <span class="ob-text"><b>SwiftDL ${esc(update.version)} is available</b>${busy ? "Downloading the update…" : "You have " + esc(state.version)}</span>
+    <span class="ob-text"><b>MotlyDL ${esc(update.version)} is available</b>${busy ? "Downloading the update…" : "You have " + esc(state.version)}</span>
     <span class="ob-actions">${busy ? "" : `<button class="link-btn" data-notes>What's new</button><button class="link-btn" data-install>${install}</button><button class="sq-btn" data-skip title="Skip this version">${icon("x")}</button>`}</span>`;
 }
 async function checkUpdate() {
@@ -1178,24 +1301,40 @@ async function boot() {
   ingest(s.items);
   nextPending();
   loadIntegration();
-  // Every 2 s until a browser connects, so adding the extension shows up at
-  // once; after that a slow check is enough. Also on coming back to the window.
-  let tick = 0;
-  setInterval(() => { if (!state.integration?.lastSeen || ++tick % 8 === 0) loadIntegration(); }, 2000);
-  window.addEventListener("focus", () => loadIntegration());
+  // Poll while onboarding is waiting on the extension; stop once connected or
+  // dismissed (`focus` and opening Settings/Guide still refresh immediately).
+  const extPoll = setInterval(() => {
+    if (state.integration?.lastSeen || state.settings?.onboardingDismissed) {
+      clearInterval(extPoll);
+      return;
+    }
+    if (!document.hidden && !$("dlg-ext").open) loadIntegration();
+  }, 2000);
+  window.addEventListener("focus", () => { if (!document.hidden) loadIntegration(); });
   setTimeout(checkUpdate, 5000);
   setInterval(checkUpdate, 12 * 60 * 60 * 1000);
   await listen("downloads", (e) => ingest(e.payload));
   // A one-time setting finished (when-done fired, or the queue's start time came).
   await listen("settings", (e) => { state.settings = e.payload; if ($("dlg-settings").open) openSettings(); });
   await listen("incoming", () => invoke("get_state").then((s) => { state.pending.push(...s.pending); nextPending(); }));
+  await listen("refresh-state", (e) => {
+    const ev = e.payload;
+    if (!ev) return;
+    if (ev.status === "matched") toast(`Link refreshed — resuming ${esc(ev.filename || "")}`, "ok");
+    else if (ev.status === "mismatch") toast(esc(ev.error || "Captured download didn't match"), "err");
+  });
   setInterval(() => {
+    if (document.hidden || graphFlat) return;
     if (!state.items.some((i) => i.status === "downloading")) {
       state.totalHist.push(0);
       if (state.totalHist.length > HISTORY) state.totalHist.shift();
       areaChart($("net-graph"), state.totalHist);
+      if (state.totalHist.every((v) => v === 0)) graphFlat = true;
     }
   }, 500);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) areaChart($("net-graph"), state.totalHist);
+  });
   addEventListener("resize", () => render());
 }
 boot();

@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea for SwiftDL
+description: Suggest an idea for MotlyDL
 labels: [enhancement]
 body:
   - type: textarea

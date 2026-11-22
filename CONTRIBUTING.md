@@ -1,4 +1,4 @@
-# Contributing to SwiftDL
+# Contributing to MotlyDL
 
 Thanks for helping. Bug reports, ideas and pull requests are all welcome.
 
@@ -62,7 +62,7 @@ Scopes: `engine`, `cli`, `app`, `ui`, `extension`, `release`.
 
 ## Reporting bugs
 
-Open an issue with the bug report template. Include your OS, SwiftDL version,
+Open an issue with the bug report template. Include your OS, MotlyDL version,
 browser (for extension issues) and, if possible, a link that reproduces it.
 
 ## For maintainers
@@ -70,7 +70,7 @@ browser (for extension issues) and, if possible, a link that reproduces it.
 ### Releasing
 
 1. Update the version in `Cargo.toml`, `app/src-tauri/tauri.conf.json` and `extension/manifest.json`, and move the **Unreleased** notes in `CHANGELOG.md` under the new version.
-2. Commit `chore(release): x.y.z` and tag it: `git tag -a vx.y.z -m "SwiftDL x.y.z"`.
+2. Commit `chore(release): x.y.z` and tag it: `git tag -a vx.y.z -m "MotlyDL x.y.z"`.
 3. `git push --follow-tags`. The release workflow builds Windows, macOS and Linux installers plus the extension zip into a draft release, with notes from the changelog. Review it, then publish.
 
 ### Publishing the extension

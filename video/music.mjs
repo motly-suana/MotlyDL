@@ -1,7 +1,7 @@
 // Adds a music track to the rendered film without rendering it again.
 // Use a track you have the rights to (your own, licensed, or royalty-free).
 //
-//   node music.mjs track.mp3                  -> out/swiftdl-launch-music.mp4
+//   node music.mjs track.mp3                  -> out/motlydl-launch-music.mp4
 //   node music.mjs track.mp3 --from 32        start the track 32 s in (at its drop, say)
 //   node music.mjs track.mp3 --volume 0.8     quieter or louder (1 = normalised)
 //
@@ -21,9 +21,9 @@ if (!track || !existsSync(track)) {
   console.error("usage: node music.mjs <track.mp3> [--from seconds] [--volume 1]");
   process.exit(1);
 }
-const FFMPEG = process.env.FFMPEG || [join(process.env.APPDATA || "", "com.swiftdl.app/tools/ffmpeg/ffmpeg.exe")].find(existsSync) || "ffmpeg";
-const video = join(here, "out", "swiftdl-launch.mp4");
-const out = join(here, "out", "swiftdl-launch-music.mp4");
+const FFMPEG = process.env.FFMPEG || [join(process.env.APPDATA || "", "com.motlydl.app/tools/ffmpeg/ffmpeg.exe")].find(existsSync) || "ffmpeg";
+const video = join(here, "out", "motlydl-launch.mp4");
+const out = join(here, "out", "motlydl-launch-music.mp4");
 
 const probe = spawnSync(FFMPEG, ["-i", video], { encoding: "utf8" }).stderr;
 const [, h, m, s] = /Duration: (\d+):(\d+):([\d.]+)/.exec(probe) || [];

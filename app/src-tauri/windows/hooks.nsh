@@ -1,36 +1,36 @@
 ; Extra steps for the NSIS installer (wired up in tauri.conf.json).
-; SwiftDL registers itself with browsers on every launch (per user, under
+; MotlyDL registers itself with browsers on every launch (per user, under
 ; HKCU). Remove those entries on uninstall so nothing is left behind.
 
-!define SWIFTDL_HOST "com.swiftdl.host"
-!define SWIFTDL_EXT_ID "knmfjbmojepkdiflnckpfjimfmjfcbgh"
+!define MOTLYDL_HOST "com.motlydl.host"
+!define MOTLYDL_EXT_ID "knmfjbmojepkdiflnckpfjimfmjfcbgh"
 
-!macro SWIFTDL_UNREGISTER ROOT
-  DeleteRegKey HKCU "${ROOT}\NativeMessagingHosts\${SWIFTDL_HOST}"
-  DeleteRegKey HKCU "${ROOT}\Extensions\${SWIFTDL_EXT_ID}"
+!macro MOTLYDL_UNREGISTER ROOT
+  DeleteRegKey HKCU "${ROOT}\NativeMessagingHosts\${MOTLYDL_HOST}"
+  DeleteRegKey HKCU "${ROOT}\Extensions\${MOTLYDL_EXT_ID}"
 !macroend
 
-; Magnet links and .torrent files: remove SwiftDL's registration, and the
-; magnet / .torrent defaults only while they still point to SwiftDL.
-!macro SWIFTDL_UNREGISTER_HANDLERS
-  DeleteRegKey HKCU "Software\Classes\SwiftDL.Torrent"
-  DeleteRegKey HKCU "Software\SwiftDL"
-  DeleteRegValue HKCU "Software\RegisteredApplications" "SwiftDL"
-  DeleteRegValue HKCU "Software\Classes\.torrent\OpenWithProgids" "SwiftDL.Torrent"
+; Magnet links and .torrent files: remove MotlyDL's registration, and the
+; magnet / .torrent defaults only while they still point to MotlyDL.
+!macro MOTLYDL_UNREGISTER_HANDLERS
+  DeleteRegKey HKCU "Software\Classes\MotlyDL.Torrent"
+  DeleteRegKey HKCU "Software\MotlyDL"
+  DeleteRegValue HKCU "Software\RegisteredApplications" "MotlyDL"
+  DeleteRegValue HKCU "Software\Classes\.torrent\OpenWithProgids" "MotlyDL.Torrent"
   ReadRegStr $0 HKCU "Software\Classes\.torrent" ""
-  StrCmp $0 "SwiftDL.Torrent" 0 +2
+  StrCmp $0 "MotlyDL.Torrent" 0 +2
     DeleteRegValue HKCU "Software\Classes\.torrent" ""
   ReadRegStr $0 HKCU "Software\Classes\magnet\shell\open\command" ""
   Push $0
-  Push "swiftdl"
-  Call un.SwiftDLContains
+  Push "motlydl"
+  Call un.MotlyDLContains
   Pop $1
   StrCmp $1 "1" 0 +2
     DeleteRegKey HKCU "Software\Classes\magnet"
 !macroend
 
 ; Leaves 1 on the stack if the first string contains the second (any case).
-Function un.SwiftDLContains
+Function un.MotlyDLContains
   Exch $R1 ; needle
   Exch
   Exch $R0 ; haystack
@@ -59,11 +59,11 @@ Function un.SwiftDLContains
 FunctionEnd
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  !insertmacro SWIFTDL_UNREGISTER_HANDLERS
-  !insertmacro SWIFTDL_UNREGISTER "Software\Google\Chrome"
-  !insertmacro SWIFTDL_UNREGISTER "Software\Microsoft\Edge"
-  !insertmacro SWIFTDL_UNREGISTER "Software\BraveSoftware\Brave-Browser"
-  !insertmacro SWIFTDL_UNREGISTER "Software\Vivaldi"
-  !insertmacro SWIFTDL_UNREGISTER "Software\Chromium"
-  DeleteRegKey HKCU "Software\Mozilla\NativeMessagingHosts\${SWIFTDL_HOST}"
+  !insertmacro MOTLYDL_UNREGISTER_HANDLERS
+  !insertmacro MOTLYDL_UNREGISTER "Software\Google\Chrome"
+  !insertmacro MOTLYDL_UNREGISTER "Software\Microsoft\Edge"
+  !insertmacro MOTLYDL_UNREGISTER "Software\BraveSoftware\Brave-Browser"
+  !insertmacro MOTLYDL_UNREGISTER "Software\Vivaldi"
+  !insertmacro MOTLYDL_UNREGISTER "Software\Chromium"
+  DeleteRegKey HKCU "Software\Mozilla\NativeMessagingHosts\${MOTLYDL_HOST}"
 !macroend

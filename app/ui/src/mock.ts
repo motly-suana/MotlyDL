@@ -18,11 +18,13 @@ declare global { interface Window { __video?: unknown } }
   let settings: Settings = {
     downloadDir: "C:\\Users\\you\\Downloads", connections: 8, maxConcurrent: 3, speedLimitKib: 0,
     sortIntoCategories: true, askBeforeDownload: true, notifyOnComplete: true,
-    offerExtension: true, onboardingDismissed: false, showProgressWindow: true, closeToTray: true, theme: "system", seedUntil: "stop", whenDone: "nothing", startAt: 0, proxy: "", bindAddress: "", watchClipboard: false, extractArchives: false, debridProvider: "realdebrid", debridToken: "", uiScale: 100, videoDefault: "ask", apiEnabled: false, apiPort: 6800, apiSecret: "", apiLan: false,
+    offerExtension: true, onboardingDismissed: false, showProgressWindow: true, closeToTray: true, theme: "system", seedUntil: "stop", whenDone: "nothing", startAt: 0, stopAt: 0, categoryDirs: {}, proxy: "", bindAddress: "", watchClipboard: false, extractArchives: false, debridProvider: "realdebrid", debridToken: "", uiScale: 100, videoDefault: "ask", apiEnabled: false, apiPort: 6800, apiSecret: "", apiLan: false,
   };
   if (VIDEO) Object.assign(settings, { downloadDir: "C:\\Users\\Harsh\\Downloads", onboardingDismissed: true });
   const catFor = (name: string) => {
     const ext = (name.split(".").pop() || "").toLowerCase();
+    if (["nsp", "xci", "nsz", "cia", "3ds", "nds", "gba", "rom", "iso"].includes(ext) && /game|rom|nsp|xci/i.test(name)) return "Games";
+    if (["nsp", "xci", "nsz", "cia", "3ds", "nds", "gba"].includes(ext)) return "Games";
     if (["zip", "rar", "7z", "gz", "iso", "xz", "tar"].includes(ext)) return "Compressed";
     if (["pdf", "doc", "docx", "txt", "epub", "xlsx"].includes(ext)) return "Documents";
     if (["mp3", "flac", "wav", "m4a", "ogg"].includes(ext)) return "Music";
@@ -31,7 +33,7 @@ declare global { interface Window { __video?: unknown } }
     if (["jpg", "png", "gif", "webp"].includes(ext)) return "Images";
     return "Other";
   };
-  const dirFor = (cat: string) => (settings.sortIntoCategories && cat !== "Other" ? `${settings.downloadDir}\\${cat}` : settings.downloadDir);
+  const dirFor = (cat: string) => settings.categoryDirs[cat] || (settings.sortIntoCategories && cat !== "Other" ? `${settings.downloadDir}\\${cat}` : settings.downloadDir);
 
   // Each simulated download keeps a list of segments {pos, end} like the engine.
   interface Seg { start: number; pos: number; end: number; rate: number }
@@ -142,11 +144,14 @@ declare global { interface Window { __video?: unknown } }
       const name = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || "download.bin");
       const category = catFor(name);
       const size = VIDEO && /ubuntu/.test(name) ? 5.9 * GB : Math.round((40 + Math.random() * 900) * MB);
-      return { filename: name, size, resumable: true, category, dir: dirFor(category) };
+      return { filename: name, size, resumable: true, category, dir: dirFor(category), contentType: null };
     },
     add_download: ({ req }) => {
       const it = item(req.filename, Math.round((120 + Math.random() * 600) * MB), req.start ? "queued" : "paused", 0);
       it.url = req.url; it.path = `${req.dir}\\${req.filename}`; it.addedAt = Date.now();
+      if (req.category) it.category = req.category;
+      if (req.checksum) it.checksum = req.checksum;
+      if (req.pageUrl) it.pageUrl = req.pageUrl;
       items.push(it); schedule(); return it.id;
     },
     pause: ({ ids }) => items.filter((i) => ids.includes(i.id) && ["downloading", "queued"].includes(i.status)).forEach((i) => { i.status = "paused"; i.speed = 0; }),
@@ -155,8 +160,9 @@ declare global { interface Window { __video?: unknown } }
     set_settings: ({ settings: s }) => { settings = s; schedule(); },
     pick_folder: () => "C:\\Users\\you\\Desktop",
     open_file: () => {}, open_folder: () => {}, open_url: () => {}, open_extension_folder: () => {},
-    extension_dir: () => "C:\\Users\\you\\AppData\\Local\\SwiftDL\\extension",
+    extension_dir: () => "C:\\Users\\you\\AppData\\Local\\MotlyDL\\extension",
     default_dir: ({ filename }) => dirFor(catFor(filename)),
+    default_dir_for_category: ({ category }) => dirFor(category),
     // ?noext previews the not-connected case.
     integration_status: () => (location.search.includes("noext") ? {
       browsers: [
@@ -184,7 +190,15 @@ declare global { interface Window { __video?: unknown } }
     open_store: () => {}, open_extensions_page: () => {}, open_log: () => {},
     get_item: ({ id }) => JSON.parse(JSON.stringify(items.find((i) => i.id === id) || null)),
     confirm_info: () => (location.search.includes("torrent") ? { url: "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=Blender+Open+Movies", filename: "" } : VIDEO && !location.search.includes("yt") ? { url: "https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-desktop-amd64.iso", filename: "", referrer: "https://ubuntu.com/download/desktop" } : location.search.includes("yt") ? { url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ", filename: "" } : { url: "https://cdn.example.net/releases/Obsidian-2.4.1-setup.exe", filename: "", referrer: "https://obsidian.example.net/download" }),
-    forget_confirm: () => {}, probe_note: () => null, set_url: () => {}, download_next: () => true, add_metalink: async () => ["ubuntu.iso", 3],
+    forget_confirm: () => {}, probe_note: () => null, set_url: () => {},
+    start_refresh: ({ id }) => {
+      const it = items.find((i) => i.id === id);
+      if (!it) throw new Error("Download not found");
+      emit("refresh-state", { itemId: id, filename: it.filename, status: "waiting", pageUrl: it.pageUrl || it.url });
+      return it.pageUrl || it.url;
+    },
+    cancel_refresh: () => { emit("refresh-state", null); },
+    download_next: () => true, add_metalink: async () => ["ubuntu.iso", 3],
     is_playlist_url: ({ url }: { url: string }) => /playlist\?list=/.test(url),
     probe_playlist: async () => ({ title: "Popular Music Videos", entries: [
       { url: "https://www.youtube.com/watch?v=a1", title: "BELLAKEO (Video Oficial) - Peso Pluma, Anitta", duration: 235 },
@@ -199,7 +213,7 @@ declare global { interface Window { __video?: unknown } }
       { url: "https://example.com/talk.mp4", name: "talk.mp4" }, { url: "https://example.com/data.zip", name: "data.zip" },
       { url: "https://example.com/about", name: "about" },
     ], open_in_browser: () => {}, add_links: ({ text }: { text: string }) => text.split(/\s+/).filter((t) => /^https?:/i.test(t)).length, show_main: () => {},
-    check_update: () => ({ version: "0.3.2", page: "https://github.com/harshsinghsv/swiftdl/releases/latest", asset: null }),
+    check_update: () => ({ version: "0.3.2", page: "https://github.com/motly-suana/MotlyDL/releases/latest", asset: null }),
     install_update: () => {},
     is_media_url: ({ url }) => /(^|\.)(youtube\.com|youtu\.be|vimeo\.com)\//.test(url.replace(/^https?:\/\//, "").replace(/^www\./, "")),
     open_new_download: () => {},

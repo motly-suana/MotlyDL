@@ -2,7 +2,7 @@
 // frame at time t; this steps through every frame in headless Chrome and
 // pipes screenshots into ffmpeg. Deterministic, so every render is identical.
 //
-//   node render.mjs                 full video -> out/swiftdl-launch.mp4
+//   node render.mjs                 full video -> out/motlydl-launch.mp4
 //   node render.mjs --still 2,9.5   single frames -> out/still-2.png, ...
 //   node render.mjs --vertical      9:16 cut for Reels/Shorts (same timeline)
 
@@ -26,7 +26,7 @@ const out = join(here, "out");
 mkdirSync(out, { recursive: true });
 
 const FFMPEG = process.env.FFMPEG || [
-  join(process.env.APPDATA || "", "com.swiftdl.app/tools/ffmpeg/ffmpeg.exe"),
+  join(process.env.APPDATA || "", "com.motlydl.app/tools/ffmpeg/ffmpeg.exe"),
 ].find(existsSync) || "ffmpeg";
 
 const browser = await puppeteer.launch({
@@ -53,7 +53,7 @@ if (flag("--still")) {
     console.log(path);
   }
 } else {
-  const file = join(out, vertical ? "swiftdl-launch-vertical.mp4" : "swiftdl-launch.mp4");
+  const file = join(out, vertical ? "motlydl-launch-vertical.mp4" : "motlydl-launch.mp4");
   const ff = spawn(FFMPEG, [
     "-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(FPS), "-c:v", "mjpeg", "-i", "-",
     // JPEG frames are full-range; convert to the standard (TV) range players

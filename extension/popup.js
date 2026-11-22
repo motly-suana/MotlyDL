@@ -10,7 +10,7 @@ function pickStream(items) {
   return streams.filter((m) => streams[0].at - m.at < 60000).at(-1);
 }
 
-const DEFAULTS = { enabled: true, minSizeKB: 0, disabledSites: [] };
+const DEFAULTS = { enabled: true, minSizeKB: 1024, disabledSites: [] };
 const $ = (id) => document.getElementById(id);
 const DL_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>`;
 const CHECK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5.5 12.5 4 4 9-9"/></svg>`;
@@ -50,7 +50,7 @@ async function main() {
       const e = String(r?.error || "");
       // The browser's own words, in plain terms.
       $("why").textContent = /not found|forbidden|not allowed/i.test(e)
-        ? "This browser can't find SwiftDL's helper. Install SwiftDL with its installer (not just the .exe file), open it once, then reload this extension."
+        ? "This browser can't find MotlyDL's helper. Install MotlyDL with its installer (not just the .exe file), open it once, then reload this extension."
         : e ? `The browser said: ${e}` : "Open the app once. If it's already open, restart the browser.";
     }
     $("main").hidden = !r?.ok;
@@ -67,12 +67,12 @@ async function main() {
   let html = files.map((m, i) => {
     const e = ext(m);
     const audio = /^audio/.test(m.mime) || /mp3|m4a|aac|ogg|opus|flac|wav/.test(e);
-    return `<div class="m"><span class="tag">${e.toUpperCase()}</span><span class="mt"><b>${audio ? "Audio" : "Video"}</b><span title="${esc(m.url)}">${m.size ? bytes(m.size) : esc(new URL(m.url).hostname)}</span></span><button class="dl" data-i="${i}" title="Download with SwiftDL">${DL_ICON}</button></div>`;
+    return `<div class="m"><span class="tag">${e.toUpperCase()}</span><span class="mt"><b>${audio ? "Audio" : "Video"}</b><span title="${esc(m.url)}">${m.size ? bytes(m.size) : esc(new URL(m.url).hostname)}</span></span><button class="dl" data-i="${i}" title="Download with MotlyDL">${DL_ICON}</button></div>`;
   }).join("");
-  if (stream) html += `<div class="m"><span class="tag stream">${stream.kind.toUpperCase()}</span><span class="mt"><b>Stream</b><span>Choose the quality in SwiftDL</span></span><button class="dl" data-stream title="Download with SwiftDL">${DL_ICON}</button></div>`;
-  // Video sites go through SwiftDL's quality picker, whatever the page loaded.
+  if (stream) html += `<div class="m"><span class="tag stream">${stream.kind.toUpperCase()}</span><span class="mt"><b>Stream</b><span>Choose the quality in MotlyDL</span></span><button class="dl" data-stream title="Download with MotlyDL">${DL_ICON}</button></div>`;
+  // Video sites go through MotlyDL's quality picker, whatever the page loaded.
   if (host && VIDEO_SITE.test(host)) {
-    html = `<div class="m"><span class="tag">PAGE</span><span class="mt"><b>This video</b><span>Choose the quality in SwiftDL</span></span><button class="dl" data-page title="Download with SwiftDL">${DL_ICON}</button></div>`;
+    html = `<div class="m"><span class="tag">PAGE</span><span class="mt"><b>This video</b><span>Choose the quality in MotlyDL</span></span><button class="dl" data-page title="Download with MotlyDL">${DL_ICON}</button></div>`;
   }
   $("media").innerHTML = html;
   $("found").hidden = !html;

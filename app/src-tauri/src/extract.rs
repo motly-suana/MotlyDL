@@ -32,7 +32,7 @@ fn free_folder(dir: &Path, name: &str) -> PathBuf {
 /// Unpacks `archive` and returns the folder it went into.
 pub fn unpack(archive: &Path) -> Result<PathBuf> {
     let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let kind = kind(&name).context("not an archive SwiftDL can unpack")?;
+    let kind = kind(&name).context("not an archive MotlyDL can unpack")?;
     let dir = archive.parent().unwrap_or(Path::new("."));
     let target = free_folder(dir, &stem(&name));
     std::fs::create_dir_all(&target)?;
@@ -89,7 +89,7 @@ mod tests {
     use std::io::Write;
 
     fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("swiftdl-extract-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("motlydl-extract-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -149,11 +149,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// With SWIFTDL_7Z set to a .7z file: `cargo test seven -- --ignored`.
+    /// With MOTLYDL_7Z set to a .7z file: `cargo test seven -- --ignored`.
     #[test]
     #[ignore]
     fn seven_zip() {
-        let f = PathBuf::from(std::env::var("SWIFTDL_7Z").unwrap());
+        let f = PathBuf::from(std::env::var("MOTLYDL_7Z").unwrap());
         let out = unpack(&f).unwrap();
         println!("UNPACKED {}", out.display());
     }

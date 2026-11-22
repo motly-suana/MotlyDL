@@ -14,17 +14,41 @@ use anyhow::Result;
 use serde::Serialize;
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
-pub const HOST_NAME: &str = "com.swiftdl.host";
+const INSTALLED_CACHE_TTL: Duration = Duration::from_secs(300);
+static INSTALLED_CACHE: LazyLock<Mutex<Option<(Instant, Vec<(&'static str, bool)>)>>> = LazyLock::new(|| Mutex::new(None));
+
+fn installed_cache_valid(cached_at: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(cached_at) < INSTALLED_CACHE_TTL
+}
+
+fn cached_installed_browsers() -> Vec<(&'static str, bool)> {
+    let now = Instant::now();
+    {
+        let g = INSTALLED_CACHE.lock().unwrap();
+        if let Some((at, list)) = g.as_ref() {
+            if installed_cache_valid(*at, now) {
+                return list.clone();
+            }
+        }
+    }
+    let mut list: Vec<(&'static str, bool)> = BROWSERS.iter().map(|b| (b.id, browser_exe(b.id).is_some())).collect();
+    list.push(("firefox", browser_exe("firefox").is_some()));
+    *INSTALLED_CACHE.lock().unwrap() = Some((Instant::now(), list.clone()));
+    list
+}
+
+pub const HOST_NAME: &str = "com.motlydl.host";
 
 /// Extension IDs allowed to talk to the app. Fixed by the `key` in
 /// `extension/manifest.json`; keep that key when publishing to the Chrome
 /// Web Store (upload `extension-key.pem` once) so the ID stays the same.
 pub const EXTENSION_IDS: &[&str] = &["knmfjbmojepkdiflnckpfjimfmjfcbgh"];
 /// The Firefox add-on's ID (browser_specific_settings in its manifest).
-pub const FIREFOX_ID: &str = "swiftdl@harshhh.me";
+pub const FIREFOX_ID: &str = "motlydl@motly-suana.github.io";
 pub const STORE_UPDATE_URL: &str = "https://clients2.google.com/service/update2/crx";
 
 /// Flip to `true` once the extension is live on the Chrome Web Store. Until
@@ -32,8 +56,8 @@ pub const STORE_UPDATE_URL: &str = "https://clients2.google.com/service/update2/
 /// instead of offering store buttons that would lead nowhere.
 pub const STORE_PUBLISHED: bool = false;
 
-/// The add-on's listing on Firefox Add-ons (live since 0.3.0).
-pub const FIREFOX_STORE_URL: &str = "https://addons.mozilla.org/firefox/addon/swiftdl-integration/";
+/// The add-on's listing / release download for Firefox.
+pub const FIREFOX_STORE_URL: &str = "https://github.com/motly-suana/MotlyDL/releases/latest";
 
 pub fn store_url() -> String {
     format!("https://chromewebstore.google.com/detail/{}", EXTENSION_IDS[0])
@@ -42,7 +66,7 @@ pub fn store_url() -> String {
 /// Same folder Tauri uses for `app_data_dir`, computed without a running
 /// app so the native-host process can use it too.
 pub fn data_dir() -> PathBuf {
-    let id = "com.swiftdl.app";
+    let id = "com.motlydl.app";
     #[cfg(windows)]
     let base = std::env::var_os("APPDATA").map(PathBuf::from);
     #[cfg(target_os = "macos")]
@@ -116,7 +140,7 @@ pub fn register(data_dir: &Path) -> Result<()> {
     let exe = std::env::current_exe()?;
     let manifest = json!({
         "name": HOST_NAME,
-        "description": "SwiftDL download manager",
+        "description": "MotlyDL download manager",
         "path": exe,
         "type": "stdio",
         "allowed_origins": EXTENSION_IDS.iter().map(|id| format!("chrome-extension://{id}/")).collect::<Vec<_>>(),
@@ -182,7 +206,7 @@ fn chromium_profile_dirs(home: &Path) -> Vec<PathBuf> {
 fn register_firefox(data_dir: &Path, exe: &Path) -> Result<()> {
     let manifest = json!({
         "name": HOST_NAME,
-        "description": "SwiftDL download manager",
+        "description": "MotlyDL download manager",
         "path": exe,
         "type": "stdio",
         "allowed_extensions": [FIREFOX_ID],
@@ -369,12 +393,14 @@ pub struct IntegrationStatus {
 
 pub fn status() -> IntegrationStatus {
     let seen = read_seen();
+    let installed = cached_installed_browsers();
+    let is_installed = |id: &str| installed.iter().find(|(bid, _)| *bid == id).is_some_and(|(_, ok)| *ok);
     let mut browsers: Vec<BrowserStatus> = BROWSERS
         .iter()
         .map(|b| BrowserStatus {
             id: b.id,
             name: b.name,
-            installed: browser_exe(b.id).is_some(),
+            installed: is_installed(b.id),
             auto_offer: b.external,
             last_seen: seen["browsers"][b.id].as_u64(),
         })
@@ -382,7 +408,7 @@ pub fn status() -> IntegrationStatus {
     browsers.push(BrowserStatus {
         id: "firefox",
         name: "Firefox",
-        installed: browser_exe("firefox").is_some(),
+        installed: is_installed("firefox"),
         auto_offer: false,
         last_seen: seen["browsers"]["firefox"].as_u64(),
     });
@@ -446,7 +472,7 @@ mod tests {
 
     #[test]
     fn finds_chromium_forks_by_shape() {
-        let home = std::env::temp_dir().join(format!("swiftdl-forks-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("motlydl-forks-{}", std::process::id()));
         #[cfg(target_os = "macos")]
         let root = home.join("Library/Application Support");
         #[cfg(not(target_os = "macos"))]
@@ -475,5 +501,12 @@ mod fork_tests {
         assert_eq!(browser_from_exe("/usr/bin/zenity"), None, "a dialog tool is not a browser");
         assert_eq!(browser_from_exe(r"C:\Program Files\Mozilla Firefox\firefox.exe"), Some("firefox"));
         assert_eq!(browser_from_exe(r"C:\Program Files\Google\Chrome\Application\chrome.exe"), Some("chrome"));
+    }
+
+    #[test]
+    fn installed_browser_cache_respects_ttl() {
+        let base = super::Instant::now();
+        assert!(super::installed_cache_valid(base, base + super::Duration::from_secs(299)));
+        assert!(!super::installed_cache_valid(base, base + super::Duration::from_secs(300)));
     }
 }

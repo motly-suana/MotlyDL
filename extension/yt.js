@@ -1,10 +1,10 @@
 // Runs inside YouTube's own page (not the extension's sandbox), because only
 // there can it see the player's data. When content.js asks, it answers with
-// the formats YouTube already sent for the current video, which lets SwiftDL
+// the formats YouTube already sent for the current video, which lets MotlyDL
 // show every quality at once instead of looking the video up again.
 (() => {
   window.addEventListener("message", (e) => {
-    if (e.source !== window || e.data?.swiftdl !== "yt-ask") return;
+    if (e.source !== window || e.data?.motlydl !== "yt-ask") return;
     let r = null;
     try {
       r = document.getElementById("movie_player")?.getPlayerResponse?.() || window.ytInitialPlayerResponse || null;
@@ -17,6 +17,6 @@
       // HDR10 (PQ) or HLG, from the stream's colour information.
       hdr: /ST2084|B67/i.test(f.colorInfo?.transferCharacteristics || ""),
     }));
-    window.postMessage({ swiftdl: "yt-info", id: r?.videoDetails?.videoId || null, title: r?.videoDetails?.title || "", live: !!r?.videoDetails?.isLive, formats }, "*");
+    window.postMessage({ motlydl: "yt-info", id: r?.videoDetails?.videoId || null, title: r?.videoDetails?.title || "", live: !!r?.videoDetails?.isLive, formats }, "*");
   });
 })();

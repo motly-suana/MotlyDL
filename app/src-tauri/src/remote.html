@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>SwiftDL Remote</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14.5' fill='%2317181c'/%3E%3Cg fill='%23fff' transform='translate(13 13) scale(1.1875)'%3E%3Crect x='4.5' y='3' width='4.4' height='12' rx='2.2'/%3E%3Crect x='10.9' y='3' width='4.4' height='17' rx='2.2'/%3E%3Crect x='16.7' y='3' width='4.4' height='17' rx='2.2'/%3E%3Crect x='23.1' y='3' width='4.4' height='12' rx='2.2'/%3E%3Cpath d='M6 21.5 16 28l10-6.5' fill='none' stroke='%23fff' stroke-width='4.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
+<title>MotlyDL Remote</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%231e1b4b'/%3E%3Cstop offset='1' stop-color='%23090d16'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14.5' fill='url(%23g)'/%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round' transform='translate(13 13) scale(1.1875)'%3E%3Cpath d='M5.6 21.4V5.8l4.8 5M26.4 21.4V5.8l-4.8 5' stroke='%23f8fafc' stroke-width='4.2'/%3E%3Cpath d='M16 4.8v15.4M11 16.4l5 4.8 5-4.8' stroke='%2338bdf8' stroke-width='3.6'/%3E%3Cpath d='M5.8 27.2h20.4' stroke='%23f8fafc' stroke-width='3.6'/%3E%3C/g%3E%3C/svg%3E">
 <style>
-  /* The same colours and spacing as SwiftDL's own window. */
+  /* The same colours and spacing as MotlyDL's own window. */
   :root { --bg:#f3f3f5; --panel:#fff; --group:rgba(248,248,250,.94); --border:rgba(15,15,25,.08); --border-2:rgba(15,15,25,.13); --text:#17171c; --text-2:#3c3d45; --muted:#6c6e78; --faint:#a2a4ad; --accent:#007aff; --btn:rgba(15,15,25,.055); --btn-h:rgba(15,15,25,.09); --hover:rgba(15,15,25,.04); --pbg:#18181b; --ptext:#fff; --green:#23864f; --amber:#b9780c; --red:#cf4540; --track:rgba(15,15,25,.08); color-scheme:light; }
   @media (prefers-color-scheme: dark) { :root { --bg:#090a0c; --panel:#101114; --group:rgba(20,21,25,.94); --border:rgba(255,255,255,.07); --border-2:rgba(255,255,255,.12); --text:#eef0f3; --text-2:#c7cad1; --muted:#8a8e98; --faint:#5c6069; --accent:#0a84ff; --btn:rgba(255,255,255,.07); --btn-h:rgba(255,255,255,.11); --hover:rgba(255,255,255,.035); --pbg:#eceef1; --ptext:#0e0f12; --green:#3fa877; --amber:#d9a03e; --red:#e0605a; --track:rgba(255,255,255,.08); color-scheme:dark; } }
   * { box-sizing: border-box; }
@@ -76,8 +76,8 @@
 <body>
 <div class="card">
   <header>
-    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14.5" fill="#17181c"/><g fill="#fff" transform="translate(13 13) scale(1.1875)"><rect x="4.5" y="3" width="4.4" height="12" rx="2.2"/><rect x="10.9" y="3" width="4.4" height="17" rx="2.2"/><rect x="16.7" y="3" width="4.4" height="17" rx="2.2"/><rect x="23.1" y="3" width="4.4" height="12" rx="2.2"/><path d="M6 21.5 16 28l10-6.5" fill="none" stroke="#fff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/></g></svg>
-    <b>SwiftDL</b><span class="grow"></span>
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="mg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e1b4b"/><stop offset=".55" stop-color="#0f172a"/><stop offset="1" stop-color="#090d16"/></linearGradient><linearGradient id="mc1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs><rect width="64" height="64" rx="14.5" fill="url(#mg1)"/><rect x=".5" y=".5" width="63" height="63" rx="14" fill="none" stroke="#fff" stroke-opacity=".14"/><g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(13 13) scale(1.1875)"><path d="M5.6 21.4V5.8l4.8 5M26.4 21.4V5.8l-4.8 5" stroke="#f8fafc" stroke-width="4.2"/><path d="M16 4.8v15.4M11 16.4l5 4.8 5-4.8" stroke="url(#mc1)" stroke-width="3.6"/><path d="M5.8 27.2h20.4" stroke="#f8fafc" stroke-width="3.6"/></g></svg>
+    <b>MotlyDL</b><span class="grow"></span>
     <svg id="spark" viewBox="0 0 84 22" preserveAspectRatio="none" aria-hidden="true"><path d=""/></svg><span id="speed"></span>
   </header>
   <form class="bar" id="add"><input id="url" type="text" inputmode="url" placeholder="Paste a link to download" autocomplete="off" spellcheck="false"><button class="primary" type="submit">Download</button></form>
@@ -85,13 +85,13 @@
   <div id="list"></div>
 </div>
 <div id="gate"><form id="gateform">
-  <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14.5" fill="#17181c"/><g fill="#fff" transform="translate(13 13) scale(1.1875)"><rect x="4.5" y="3" width="4.4" height="12" rx="2.2"/><rect x="10.9" y="3" width="4.4" height="17" rx="2.2"/><rect x="16.7" y="3" width="4.4" height="17" rx="2.2"/><rect x="23.1" y="3" width="4.4" height="12" rx="2.2"/><path d="M6 21.5 16 28l10-6.5" fill="none" stroke="#fff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/></g></svg>SwiftDL Remote</div>
-  <p>Enter the secret from SwiftDL's Settings, Local API.</p><input id="secret" type="password" placeholder="Secret" autocomplete="off"><div class="bad" id="bad"></div><button class="primary" type="submit">Connect</button></form></div>
+  <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="mg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e1b4b"/><stop offset=".55" stop-color="#0f172a"/><stop offset="1" stop-color="#090d16"/></linearGradient><linearGradient id="mc2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs><rect width="64" height="64" rx="14.5" fill="url(#mg2)"/><rect x=".5" y=".5" width="63" height="63" rx="14" fill="none" stroke="#fff" stroke-opacity=".14"/><g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(13 13) scale(1.1875)"><path d="M5.6 21.4V5.8l4.8 5M26.4 21.4V5.8l-4.8 5" stroke="#f8fafc" stroke-width="4.2"/><path d="M16 4.8v15.4M11 16.4l5 4.8 5-4.8" stroke="url(#mc2)" stroke-width="3.6"/><path d="M5.8 27.2h20.4" stroke="#f8fafc" stroke-width="3.6"/></g></svg>MotlyDL Remote</div>
+  <p>Enter the secret from MotlyDL's Settings, Local API.</p><input id="secret" type="password" placeholder="Secret" autocomplete="off"><div class="bad" id="bad"></div><button class="primary" type="submit">Connect</button></form></div>
 <div id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
 let secret = "";
-try { secret = localStorage.getItem("swiftdl-remote-secret") || ""; } catch {}
+try { secret = localStorage.getItem("motlydl-remote-secret") || ""; } catch {}
 const KEYS = ["gid", "status", "totalLength", "completedLength", "downloadSpeed", "errorMessage", "files"];
 
 async function rpc(calls) {
@@ -167,7 +167,7 @@ function gate(msg) { $("bad").textContent = msg || ""; $("gate").classList.add("
 $("gateform").addEventListener("submit", (e) => {
   e.preventDefault();
   secret = $("secret").value.trim();
-  try { localStorage.setItem("swiftdl-remote-secret", secret); } catch {}
+  try { localStorage.setItem("motlydl-remote-secret", secret); } catch {}
   refresh();
 });
 
@@ -201,7 +201,8 @@ $("list").addEventListener("click", async (e) => {
 });
 
 refresh();
-setInterval(() => { if (!armed) refresh(); }, 1500);
+setInterval(() => { if (!armed && !document.hidden) refresh(); }, 1500);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !armed) refresh(); });
 </script>
 </body>
 </html>

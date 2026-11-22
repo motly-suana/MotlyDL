@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use swiftdl_engine::header::{HeaderMap, HeaderName, HeaderValue};
-use swiftdl_engine::{CancellationToken, Client, Outcome, Progress, Request, SpeedLimiter};
-use tauri::{AppHandle, Emitter};
+use motlydl_engine::header::{HeaderMap, HeaderName, HeaderValue};
+use motlydl_engine::{CancellationToken, Client, Outcome, Progress, Request, SpeedLimiter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -67,7 +67,7 @@ pub struct Item {
     /// Live status text, such as "Merging video and audio".
     #[serde(default, skip_deserializing)]
     pub note: Option<String>,
-    /// SHA-256 the user gave to check the finished file against.
+    /// Checksum (MD5, SHA-1, SHA-256, or SHA-512) to verify the finished file against.
     #[serde(default)]
     pub checksum: Option<String>,
     /// Other addresses of the same file (from a Metalink).
@@ -76,11 +76,14 @@ pub struct Item {
     /// The finished file matched `checksum`.
     #[serde(default)]
     pub verified: bool,
+    /// Page URL where the download originated (kept across pause/error for link refresh).
+    #[serde(default)]
+    pub page_url: Option<String>,
 }
 
 /// A download sent by the browser extension, waiting for the user to
 /// confirm it in the Add dialog.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Incoming {
     pub url: String,
@@ -92,6 +95,12 @@ pub struct Incoming {
     pub cookies: Option<String>,
     #[serde(default)]
     pub user_agent: Option<String>,
+    #[serde(default)]
+    pub page_url: Option<String>,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub content_length: Option<u64>,
     /// A video's qualities, read by the extension from the page itself, so
     /// the New download window can show them without asking yt-dlp.
     #[serde(default)]
@@ -125,7 +134,7 @@ impl Incoming {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddRequest {
     pub url: String,
@@ -145,7 +154,7 @@ pub struct AddRequest {
     /// Expected size, when known up front (video qualities).
     #[serde(default)]
     pub size: Option<u64>,
-    /// SHA-256 to check the finished file against.
+    /// Checksum (MD5, SHA-1, SHA-256, or SHA-512) to verify the finished file against.
     #[serde(default)]
     pub checksum: Option<String>,
     /// Other addresses of the same file.
@@ -154,6 +163,22 @@ pub struct AddRequest {
     /// A torrent: the files to download (see `Item::torrent_files`).
     #[serde(default)]
     pub torrent_files: Option<Vec<usize>>,
+    /// Explicit category chosen by the user in the New download window.
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Server MIME type for fallback categorization when filename lacks an extension.
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// Source page URL stored for expired-link refresh.
+    #[serde(default)]
+    pub page_url: Option<String>,
+}
+
+struct RefreshTarget {
+    item_id: u64,
+    filename: String,
+    size: Option<u64>,
+    started_at: Instant,
 }
 
 struct Running {
@@ -175,6 +200,7 @@ struct Inner {
     next_confirm: u64,
     /// Download id -> label of the window showing its progress.
     windows: HashMap<u64, String>,
+    refresh_target: Option<RefreshTarget>,
     next_id: u64,
     dirty: bool,
 }
@@ -185,6 +211,7 @@ pub struct DownloadManager {
     limiter: Arc<SpeedLimiter>,
     /// The tray's "Ignore speed limit" is on.
     limit_off: std::sync::atomic::AtomicBool,
+    wake: tokio::sync::Notify,
     data_dir: PathBuf,
     inner: Mutex<Inner>,
 }
@@ -202,8 +229,11 @@ impl DownloadManager {
             if item.status == Status::Downloading {
                 item.status = Status::Paused;
             }
+            if item.status == Status::Completed && !item.segments.is_empty() {
+                item.segments.clear();
+            }
             if item.status != Status::Completed && item.remaining.is_empty() {
-                item.remaining = swiftdl_engine::saved_remaining(&item.path).unwrap_or_default();
+                item.remaining = motlydl_engine::saved_remaining(&item.path).unwrap_or_default();
             }
         }
         let next_id = items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
@@ -212,9 +242,10 @@ impl DownloadManager {
             client: {
                 crate::media::set_proxy(&settings.proxy);
                 crate::media::set_bind(&settings.bind_address);
-                swiftdl_engine::build_client_opts(&settings.proxy, &settings.bind_address)?
+                motlydl_engine::build_client_opts(&settings.proxy, &settings.bind_address)?
             },
             limit_off: std::sync::atomic::AtomicBool::new(false),
+            wake: tokio::sync::Notify::new(),
             limiter: Arc::new(SpeedLimiter::new(settings.speed_limit_kib * 1024)),
             data_dir,
             inner: Mutex::new(Inner {
@@ -225,6 +256,7 @@ impl DownloadManager {
                 confirms: HashMap::new(),
                 next_confirm: 1,
                 windows: HashMap::new(),
+                refresh_target: None,
                 next_id,
                 dirty: false,
             }),
@@ -249,17 +281,29 @@ impl DownloadManager {
 
     /// Where a file of this category goes by default.
     pub fn default_dir(&self, category: &str) -> PathBuf {
-        let s = self.settings();
-        if s.sort_into_categories && category != "Other" {
-            s.download_dir.join(category)
-        } else {
-            s.download_dir
-        }
+        default_dir_for_settings(&self.settings(), category)
     }
 
     pub fn add(self: &Arc<Self>, req: AddRequest) -> u64 {
         let filename = req.filename.trim().to_string();
-        let path = swiftdl_engine::resolve_dest(&req.dir, &filename);
+        let path = motlydl_engine::resolve_dest(&req.dir, &filename);
+        let category = req
+            .category
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| is_valid_category(c))
+            .map(str::to_string)
+            .unwrap_or_else(|| category_for_with_mime(&filename, req.content_type.as_deref()).to_string());
+        let checksum = req
+            .checksum
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_ascii_lowercase);
+        let page_url = req
+            .page_url
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("referer")).map(|(_, v)| v.clone()));
         let id = {
             let mut g = self.inner.lock().unwrap();
             let id = g.next_id;
@@ -268,7 +312,7 @@ impl DownloadManager {
                 id,
                 url: req.url,
                 filename: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(filename.clone()),
-                category: category_for(&filename).to_string(),
+                category,
                 path,
                 size: req.size,
                 downloaded: 0,
@@ -285,9 +329,10 @@ impl DownloadManager {
                 format: req.format,
                 torrent_files: req.torrent_files,
                 note: None,
-                checksum: req.checksum,
+                checksum,
                 mirrors: req.mirrors,
                 verified: false,
+                page_url,
             });
             if let Some(label) = req.window {
                 g.windows.insert(id, label);
@@ -363,6 +408,7 @@ impl DownloadManager {
         self.inner.lock().unwrap().settings = settings;
         self.save();
         self.schedule();
+        self.wake.notify_one();
     }
 
     fn apply_limit(&self, kib: u64) {
@@ -390,14 +436,11 @@ impl DownloadManager {
             url: m.urls[0].clone(),
             filename: m.name.clone(),
             dir,
-            headers: vec![],
             start: true,
-            window: None,
-            format: None,
             size: m.size,
-            torrent_files: None,
-            checksum: m.sha256,
+            checksum: m.checksum,
             mirrors: m.urls[1..].to_vec(),
+            ..Default::default()
         });
         Ok((m.name, n))
     }
@@ -443,6 +486,55 @@ impl DownloadManager {
     }
 
     pub fn incoming(self: &Arc<Self>, inc: Incoming) {
+        let pending_refresh = {
+            let mut g = self.inner.lock().unwrap();
+            match g.refresh_target.take() {
+                Some(t) if t.started_at.elapsed() < Duration::from_secs(600) => Some(t),
+                _ => None,
+            }
+        };
+        if let Some(target) = pending_refresh {
+            if !crate::media::is_media_url(&inc.url) && !crate::torrent::is_torrent(&inc.url, inc.filename.as_deref()) {
+                let this = self.clone();
+                tauri::async_runtime::spawn(async move {
+                    let headers = inc.headers();
+                    let probed = motlydl_engine::probe(&this.client, &inc.url, &to_header_map(&headers)).await.ok();
+                    let incoming_size = probed.as_ref().and_then(|r| r.size).or(inc.content_length);
+                    let incoming_name = probed.as_ref().map(|r| r.filename.clone()).or_else(|| inc.suggested_name());
+                    match matches_refresh_target(&target.filename, target.size, incoming_name.as_deref(), incoming_size) {
+                        Ok(()) => match this.set_url_with_headers(target.item_id, &inc.url, Some(headers)) {
+                            Ok(()) => {
+                                let _ = this.app.emit(
+                                    "refresh-state",
+                                    serde_json::json!({ "itemId": target.item_id, "filename": target.filename, "status": "matched" }),
+                                );
+                            }
+                            Err(err) => {
+                                let _ = this.app.emit(
+                                    "refresh-state",
+                                    serde_json::json!({ "itemId": target.item_id, "filename": target.filename, "status": "mismatch", "error": err }),
+                                );
+                                this.dispatch_incoming(inc);
+                            }
+                        },
+                        Err(reason) => {
+                            let _ = this.app.emit(
+                                "refresh-state",
+                                serde_json::json!({ "itemId": target.item_id, "filename": target.filename, "status": "mismatch", "error": reason }),
+                            );
+                            this.dispatch_incoming(inc);
+                        }
+                    }
+                });
+                return;
+            }
+            // Keep refresh target active if the user captured a torrent/video page in the meantime.
+            self.inner.lock().unwrap().refresh_target = Some(target);
+        }
+        self.dispatch_incoming(inc);
+    }
+
+    fn dispatch_incoming(self: &Arc<Self>, inc: Incoming) {
         self.prepare(&inc);
         // Video sites always ask: there's a quality to choose.
         if self.settings().ask_before_download || crate::media::is_media_url(&inc.url) || crate::torrent::is_torrent(&inc.url, inc.filename.as_deref()) {
@@ -457,7 +549,7 @@ impl DownloadManager {
     pub fn add_links(self: &Arc<Self>, text: &str) -> usize {
         let links = crate::batch::expand_links(text);
         for url in &links {
-            let inc = Incoming { url: url.clone(), filename: None, referrer: None, cookies: None, user_agent: None, qualities: None, pick: None };
+            let inc = Incoming { url: url.clone(), ..Default::default() };
             if crate::media::is_media_url(url) || crate::torrent::is_torrent(url, None) {
                 self.new_download_window(inc);
             } else {
@@ -472,10 +564,23 @@ impl DownloadManager {
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
             let headers = inc.headers();
-            let probed = swiftdl_engine::probe(&this.client, &inc.url, &to_header_map(&headers)).await.ok().map(|r| r.filename);
-            let filename = inc.suggested_name().or(probed).unwrap_or_else(|| "download.bin".into());
-            let dir = this.default_dir(category_for(&filename));
-            this.add(AddRequest { url: inc.url, filename, dir, headers, start: true, window: None, format: None, size: None, torrent_files: None, checksum: None, mirrors: vec![] });
+            let probed = motlydl_engine::probe(&this.client, &inc.url, &to_header_map(&headers)).await.ok();
+            let content_type = probed.as_ref().and_then(|r| r.content_type.clone()).or_else(|| inc.content_type.clone());
+            let filename = inc.suggested_name().or_else(|| probed.map(|r| r.filename)).unwrap_or_else(|| "download.bin".into());
+            let category = category_for_with_mime(&filename, content_type.as_deref());
+            let dir = this.default_dir(category);
+            let page_url = inc.page_url.clone().or_else(|| inc.referrer.clone());
+            this.add(AddRequest {
+                url: inc.url,
+                filename,
+                dir,
+                headers,
+                start: true,
+                category: Some(category.to_string()),
+                content_type,
+                page_url,
+                ..Default::default()
+            });
         });
     }
 
@@ -489,14 +594,10 @@ impl DownloadManager {
                 url: url.clone(),
                 filename: format!("{}.{ext}", clean_name(title)),
                 dir: self.default_dir(category),
-                headers: vec![],
                 start: true,
-                window: None,
                 format: Some(format.to_string()),
-                size: None,
-                torrent_files: None,
-                checksum: None,
-                mirrors: vec![],
+                category: Some(category.to_string()),
+                ..Default::default()
             });
         }
         entries.len()
@@ -541,12 +642,11 @@ impl DownloadManager {
                 dir,
                 headers: inc.headers(),
                 start: true,
-                window: None,
                 format: Some(q.format),
                 size: q.size,
-                torrent_files: None,
-                checksum: None,
-                mirrors: vec![],
+                category: Some(category.to_string()),
+                page_url: inc.page_url.clone().or_else(|| inc.referrer.clone()),
+                ..Default::default()
             });
         });
     }
@@ -577,10 +677,16 @@ impl DownloadManager {
         self.inner.lock().unwrap().confirms.remove(&token);
     }
 
+    /// Cleans tracked progress/confirmation state when a window closes or is destroyed.
+    pub fn on_window_destroyed(&self, label: &str) {
+        let mut g = self.inner.lock().unwrap();
+        let Inner { windows, confirms, .. } = &mut *g;
+        prune_destroyed_window(windows, confirms, label);
+    }
+
     /// Opens (or keeps) the progress window for each newly started
     /// download, unless the user turned that off.
     fn open_progress_windows(&self, ids: &[u64]) {
-        use tauri::Manager as _;
         let to_open: Vec<(u64, String)> = {
             let mut g = self.inner.lock().unwrap();
             if !g.settings.show_progress_window {
@@ -699,9 +805,9 @@ impl DownloadManager {
                             Ok(Some(direct)) => {
                                 req.url = direct.url;
                                 req.headers = Default::default();
-                                swiftdl_engine::run(&this.client, &req, progress, cancel, this.limiter.clone()).await
+                                motlydl_engine::run(&this.client, &req, progress, cancel, this.limiter.clone()).await
                             }
-                            Ok(None) => swiftdl_engine::run(&this.client, &req, progress, cancel, this.limiter.clone()).await,
+                            Ok(None) => motlydl_engine::run(&this.client, &req, progress, cancel, this.limiter.clone()).await,
                             Err(e) => Err(e),
                         }
                     }
@@ -755,6 +861,7 @@ impl DownloadManager {
                             item.downloaded = item.size.unwrap_or(item.downloaded);
                             item.headers.clear();
                             item.remaining.clear();
+                            item.segments.clear();
                             if notify_enabled {
                                 notify = Some(item.filename.clone());
                             }
@@ -811,28 +918,57 @@ impl DownloadManager {
         }
     }
 
-    /// Checks a finished file against the SHA-256 the user gave, if any.
+    /// Checks a finished file against `checksum` (MD5/SHA-1/SHA-256/SHA-512) or
+    /// an adjacent sidecar file (.md5, .sha1, .sha256, .sha512).
     async fn verify(self: &Arc<Self>, id: u64, result: Result<Outcome>, note: &crate::media::Note) -> Result<Outcome> {
         if !matches!(result, Ok(Outcome::Completed)) {
             return result;
         }
-        let Some((want, path)) = self.item(id).and_then(|i| i.checksum.clone().map(|c| (c, i.path.clone()))) else { return result };
-        *note.lock().unwrap() = Some("Checking the file".into());
-        match tauri::async_runtime::spawn_blocking(move || sha256_file(&path)).await {
-            Ok(Ok(got)) if got.eq_ignore_ascii_case(want.trim()) => {
+        let Some(item) = self.item(id) else { return result };
+        if item.torrent_files.is_some() {
+            return result;
+        }
+        let want = item.checksum.clone();
+        let path = item.path.clone();
+        let note_clone = note.clone();
+        match tauri::async_runtime::spawn_blocking(move || {
+            let has_explicit = want.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+            if has_explicit {
+                *note_clone.lock().unwrap() = Some("Checking checksum".into());
+            } else if let Some((algo, _)) = crate::checksum::find_sidecar(&path) {
+                *note_clone.lock().unwrap() = Some(format!("Checking {}", algo.label()));
+            }
+            crate::checksum::verify_file(&path, want.as_deref())
+        })
+        .await
+        {
+            Ok(Ok(Some((_algo, matched_hex)))) => {
                 if let Some(i) = self.inner.lock().unwrap().items.iter_mut().find(|i| i.id == id) {
                     i.verified = true;
+                    if i.checksum.as_deref().map(str::trim).is_none_or(str::is_empty) {
+                        i.checksum = Some(matched_hex);
+                    }
                 }
                 result
             }
-            Ok(Ok(got)) => Err(anyhow::anyhow!("The file's SHA-256 doesn't match. Expected {}, got {got}. It may be corrupted or not the file you meant.", want.trim())),
-            _ => Err(anyhow::anyhow!("The file finished, but couldn't be read to check it.")),
+            Ok(Ok(None)) => result,
+            Ok(Err(msg)) => Err(anyhow::anyhow!(msg)),
+            Err(_) => Err(anyhow::anyhow!("The file finished, but couldn't be read to check it.")),
         }
     }
 
     /// Replaces a stopped download's address (an expired link, refreshed) and
     /// resumes it where it left off.
     pub fn set_url(self: &Arc<Self>, id: u64, url: &str) -> Result<(), String> {
+        self.set_url_with_headers(id, url, None)
+    }
+
+    pub fn set_url_with_headers(
+        self: &Arc<Self>,
+        id: u64,
+        url: &str,
+        headers: Option<Vec<(String, String)>>,
+    ) -> Result<(), String> {
         let url = url.trim();
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             return Err("That isn't a web link".into());
@@ -847,11 +983,72 @@ impl DownloadManager {
                 return Err("Pause the download first".into());
             }
             item.url = url.to_string();
+            if let Some(h) = headers.filter(|v| !v.is_empty()) {
+                item.headers = h;
+            }
             item.error = None;
-            swiftdl_engine::rebase_saved(&item.path, url);
+            motlydl_engine::rebase_saved(&item.path, url);
         }
         self.resume(&[id]);
         Ok(())
+    }
+
+    /// Opens the source page for `id` in the browser and arms auto-matching for
+    /// the next captured regular file download with matching filename & size.
+    pub fn start_refresh(self: &Arc<Self>, id: u64) -> Result<String, String> {
+        use tauri_plugin_opener::OpenerExt;
+        let (filename, open_url, needs_pause) = {
+            let mut g = self.inner.lock().unwrap();
+            let Some(item) = g.items.iter().find(|i| i.id == id).cloned() else {
+                return Err("Download not found".into());
+            };
+            if item.format.is_some() || item.torrent_files.is_some() {
+                return Err("Only regular file downloads can refresh their address".into());
+            }
+            if item.status == Status::Completed {
+                return Err("Download is already completed".into());
+            }
+            let open_url = item
+                .page_url
+                .clone()
+                .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+                .or_else(|| {
+                    item.headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("referer"))
+                        .map(|(_, v)| v.clone())
+                        .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+                })
+                .unwrap_or_else(|| item.url.clone());
+            if !(open_url.starts_with("http://") || open_url.starts_with("https://")) {
+                return Err("No web page address recorded for this download".into());
+            }
+            let needs_pause = matches!(item.status, Status::Downloading | Status::Queued);
+            g.refresh_target = Some(RefreshTarget {
+                item_id: id,
+                filename: item.filename.clone(),
+                size: item.size,
+                started_at: Instant::now(),
+            });
+            (item.filename, open_url, needs_pause)
+        };
+        if needs_pause {
+            self.pause(&[id]);
+        }
+        self.app
+            .opener()
+            .open_url(&open_url, None::<&str>)
+            .map_err(|e| e.to_string())?;
+        let _ = self.app.emit(
+            "refresh-state",
+            serde_json::json!({ "itemId": id, "filename": filename, "status": "waiting", "pageUrl": open_url }),
+        );
+        Ok(open_url)
+    }
+
+    pub fn cancel_refresh(&self) {
+        self.inner.lock().unwrap().refresh_target = None;
+        let _ = self.app.emit("refresh-state", serde_json::Value::Null);
     }
 
     /// Quit, sleep or shut down, with a notice first.
@@ -905,28 +1102,47 @@ impl DownloadManager {
         });
     }
 
-    /// Starts the held queue once its start time has come.
-    fn check_start_time(self: &Arc<Self>) {
-        let due = {
+    /// Starts the held queue once `start_at` arrives, and pauses running/queued
+    /// downloads once `stop_at` arrives.
+    fn check_schedule(self: &Arc<Self>) {
+        let now = now_ms();
+        let (started, to_pause) = {
             let mut g = self.inner.lock().unwrap();
-            if g.settings.start_at != 0 && now_ms() >= g.settings.start_at {
+            let mut started = false;
+            if g.settings.start_at != 0 && now >= g.settings.start_at {
                 g.settings.start_at = 0;
-                true
-            } else {
-                false
+                started = true;
             }
+            let mut to_pause = Vec::new();
+            if g.settings.stop_at != 0 && now >= g.settings.stop_at {
+                g.settings.stop_at = 0;
+                to_pause = g
+                    .items
+                    .iter()
+                    .filter(|i| matches!(i.status, Status::Downloading | Status::Queued))
+                    .map(|i| i.id)
+                    .collect();
+            }
+            (started, to_pause)
         };
-        if due {
+        if started || !to_pause.is_empty() {
             let settings = self.inner.lock().unwrap().settings.clone();
             let _ = self.app.emit("settings", &settings);
             self.save();
-            self.schedule();
+            if !to_pause.is_empty() {
+                crate::log::line(&format!("scheduled stop reached: pausing {} download(s)", to_pause.len()));
+                self.pause(&to_pause);
+            }
+            if started && to_pause.is_empty() {
+                self.schedule();
+            }
         }
     }
 
-    /// Called every 500 ms: copies live progress into items, computes
-    /// speeds, and pushes a snapshot to the UI when something changed.
+    /// Copies live progress into items, computes speeds, and pushes a snapshot
+    /// to open UI windows when something changed.
     pub fn tick(&self, n: u64) {
+        let has_windows = !self.app.webview_windows().is_empty();
         let (snapshot, active) = {
             let mut g = self.inner.lock().unwrap();
             let Inner { items, running, dirty, .. } = &mut *g;
@@ -957,9 +1173,11 @@ impl DownloadManager {
                 return;
             }
             *dirty = false;
-            (items.clone(), active)
+            (has_windows.then(|| items.clone()), active)
         };
-        let _ = self.app.emit("downloads", snapshot);
+        if let Some(snapshot) = snapshot {
+            let _ = self.app.emit("downloads", snapshot);
+        }
         if active && n % 10 == 0 {
             self.save();
         }
@@ -967,6 +1185,7 @@ impl DownloadManager {
 
     fn changed(&self) {
         self.inner.lock().unwrap().dirty = true;
+        self.wake.notify_one();
     }
 
     pub fn save(&self) {
@@ -978,19 +1197,57 @@ impl DownloadManager {
         let _ = save_json(&self.data_dir.join("settings.json"), &settings);
     }
 
+    fn next_tick_wait(&self) -> Option<Duration> {
+        let g = self.inner.lock().unwrap();
+        compute_next_tick_wait(g.running.len(), g.dirty, g.settings.start_at, g.settings.stop_at, now_ms())
+    }
+
     pub fn start_ticker(self: &Arc<Self>) {
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_millis(500));
-            for n in 0u64.. {
-                tick.tick().await;
-                this.check_start_time();
+            let mut n = 0u64;
+            loop {
+                match this.next_tick_wait() {
+                    None => {
+                        this.wake.notified().await;
+                    }
+                    Some(wait) if wait.is_zero() => {}
+                    Some(wait) => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(wait) => {}
+                            _ = this.wake.notified() => {}
+                        }
+                    }
+                }
+                this.check_schedule();
                 this.tick(n);
+                n = n.wrapping_add(1);
             }
         });
         self.schedule();
     }
 
+}
+
+fn compute_next_tick_wait(running: usize, dirty: bool, start_at: u64, stop_at: u64, now: u64) -> Option<Duration> {
+    if running > 0 {
+        return Some(Duration::from_millis(500));
+    }
+    if dirty {
+        return Some(Duration::ZERO);
+    }
+    [start_at, stop_at]
+        .into_iter()
+        .filter(|&t| t > 0)
+        .min()
+        .map(|target| Duration::from_millis(target.saturating_sub(now).min(60_000)))
+}
+
+fn prune_destroyed_window(windows: &mut HashMap<u64, String>, confirms: &mut HashMap<u64, Incoming>, label: &str) {
+    windows.retain(|_, v| v != label);
+    if let Some(token) = label.strip_prefix("new-").and_then(|s| s.parse::<u64>().ok()) {
+        confirms.remove(&token);
+    }
 }
 
 /// How a download is fetched.
@@ -1014,9 +1271,28 @@ pub fn to_header_map(headers: &[(String, String)]) -> HeaderMap {
     map
 }
 
+pub const CATEGORIES: [&str; 8] = [
+    "Games",
+    "Video",
+    "Music",
+    "Programs",
+    "Compressed",
+    "Documents",
+    "Images",
+    "Other",
+];
+
+pub fn is_valid_category(c: &str) -> bool {
+    CATEGORIES.contains(&c)
+}
+
 pub fn category_for(filename: &str) -> &'static str {
     let ext = Path::new(filename).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
+        "nsp" | "xci" | "nsz" | "cia" | "3ds" | "nds" | "gba" | "gbc" | "gb" | "sfc" | "smc" | "nes" | "n64" | "z64"
+        | "v64" | "gcm" | "wbfs" | "rvz" | "chd" | "cso" | "pbp" | "vpk" | "xbe" | "xex" | "wad" | "pak" | "vdf" | "rpf" => {
+            "Games"
+        }
         "zip" | "rar" | "7z" | "tar" | "gz" | "tgz" | "xz" | "bz2" | "zst" | "iso" | "img" => "Compressed",
         "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt" | "txt" | "rtf" | "epub" | "csv" | "md" => {
             "Documents"
@@ -1029,11 +1305,125 @@ pub fn category_for(filename: &str) -> &'static str {
     }
 }
 
+/// Assigns a category by filename extension first, falling back to HTTP Content-Type
+/// when the extension is missing or unrecognized.
+pub fn category_for_with_mime(filename: &str, content_type: Option<&str>) -> &'static str {
+    let by_ext = category_for(filename);
+    if by_ext != "Other" {
+        return by_ext;
+    }
+    let Some(raw) = content_type else {
+        return "Other";
+    };
+    let mime = raw.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    if mime.starts_with("video/") {
+        "Video"
+    } else if mime.starts_with("audio/") {
+        "Music"
+    } else if mime.starts_with("image/") {
+        "Images"
+    } else if matches!(
+        mime.as_str(),
+        "application/zip"
+            | "application/x-zip-compressed"
+            | "application/x-rar-compressed"
+            | "application/vnd.rar"
+            | "application/x-7z-compressed"
+            | "application/gzip"
+            | "application/x-gzip"
+            | "application/x-tar"
+            | "application/x-xz"
+            | "application/x-bzip2"
+            | "application/zstd"
+            | "application/x-iso9660-image"
+    ) {
+        "Compressed"
+    } else if matches!(
+        mime.as_str(),
+        "application/pdf"
+            | "application/msword"
+            | "application/rtf"
+            | "application/epub+zip"
+            | "text/plain"
+            | "text/csv"
+            | "text/markdown"
+    ) || mime.starts_with("application/vnd.openxmlformats-officedocument.")
+        || mime.starts_with("application/vnd.ms-")
+        || mime.starts_with("application/vnd.oasis.opendocument.")
+    {
+        "Documents"
+    } else if matches!(
+        mime.as_str(),
+        "application/vnd.microsoft.portable-executable"
+            | "application/x-msdownload"
+            | "application/x-msi"
+            | "application/x-apple-diskimage"
+            | "application/vnd.debian.binary-package"
+            | "application/x-rpm"
+            | "application/vnd.android.package-archive"
+            | "application/x-executable"
+    ) {
+        "Programs"
+    } else {
+        "Other"
+    }
+}
+
+/// Precedence: explicit `settings.category_dirs[category]` > `download_dir/<Category>`
+/// (when `sort_into_categories` and not `"Other"`) > `download_dir`.
+pub fn default_dir_for_settings(s: &Settings, category: &str) -> PathBuf {
+    if let Some(custom) = s.category_dirs.get(category).filter(|p| !p.as_os_str().is_empty()) {
+        return custom.clone();
+    }
+    if s.sort_into_categories && category != "Other" {
+        s.download_dir.join(category)
+    } else {
+        s.download_dir.clone()
+    }
+}
+
+#[allow(dead_code)]
+pub fn is_expired_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("410")
+        || lower.contains("web page")
+        || lower.contains("expired")
+}
+
+/// Validates that a newly captured download matches the partial file being refreshed.
+pub fn matches_refresh_target(
+    target_filename: &str,
+    target_size: Option<u64>,
+    incoming_filename: Option<&str>,
+    incoming_size: Option<u64>,
+) -> std::result::Result<(), String> {
+    if let Some(expected_size) = target_size.filter(|&n| n > 0) {
+        if let Some(got_size) = incoming_size {
+            if got_size != expected_size {
+                return Err(format!(
+                    "The refreshed file size ({got_size} bytes) doesn't match the partial file ({expected_size} bytes)."
+                ));
+            }
+            return Ok(());
+        }
+    }
+    let Some(got_name) = incoming_filename.map(str::trim).filter(|n| !n.is_empty()) else {
+        return Err("Couldn't verify that the new download matches the partial file's name or size.".into());
+    };
+    if got_name.eq_ignore_ascii_case(target_filename.trim()) {
+        Ok(())
+    } else {
+        Err(format!("Captured '{got_name}', expected '{target_filename}'."))
+    }
+}
+
 fn remove_temp_files(path: &Path) {
     crate::media::cleanup(path);
-    let _ = std::fs::remove_file(swiftdl_engine::part_path(path));
+    let _ = std::fs::remove_file(motlydl_engine::part_path(path));
     let mut state = path.as_os_str().to_owned();
-    state.push(".swiftdl");
+    state.push(".motlydl");
     let _ = std::fs::remove_file(PathBuf::from(state));
 }
 
@@ -1052,30 +1442,61 @@ fn save_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     Ok(())
 }
 
-fn sha256_file(path: &Path) -> std::io::Result<String> {
-    use sha2::{Digest, Sha256};
-    use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
-    let mut hash = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hash.update(&buf[..n]);
+#[cfg(test)]
+mod checksum_tests {
+    use crate::checksum::{Algo, hash_file};
+
+    #[test]
+    fn hashes_a_file() {
+        let p = std::env::temp_dir().join(format!("motlydl-hash-test-{}.txt", std::process::id()));
+        std::fs::write(&p, b"abc").unwrap();
+        assert_eq!(hash_file(&p, Algo::Md5).unwrap(), "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(hash_file(&p, Algo::Sha1).unwrap(), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(hash_file(&p, Algo::Sha256).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            hash_file(&p, Algo::Sha512).unwrap(),
+            "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+        );
+        let _ = std::fs::remove_file(p);
     }
-    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 #[cfg(test)]
-mod checksum_tests {
+mod category_and_refresh_tests {
+    use super::*;
+
     #[test]
-    fn hashes_a_file() {
-        let p = std::env::temp_dir().join("swiftdl-sha-test.txt");
-        std::fs::write(&p, b"abc").unwrap();
-        assert_eq!(super::sha256_file(&p).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-        let _ = std::fs::remove_file(p);
+    fn categorizes_by_extension_and_mime_fallback() {
+        assert_eq!(category_for("game.nsp"), "Games");
+        assert_eq!(category_for_with_mime("download.bin", Some("application/zip; charset=binary")), "Compressed");
+        assert_eq!(category_for_with_mime("stream", Some("video/mp4")), "Video");
+        assert_eq!(category_for_with_mime("manual", Some("application/pdf")), "Documents");
+        assert_eq!(category_for_with_mime("photo.png", Some("application/octet-stream")), "Images");
+    }
+
+    #[test]
+    fn default_dir_respects_custom_category_folder_precedence() {
+        let mut s = Settings::default();
+        s.download_dir = PathBuf::from("/dl");
+        s.sort_into_categories = true;
+        assert_eq!(default_dir_for_settings(&s, "Games"), PathBuf::from("/dl/Games"));
+        assert_eq!(default_dir_for_settings(&s, "Other"), PathBuf::from("/dl"));
+        s.category_dirs.insert("Games".into(), PathBuf::from("/ssd/Games"));
+        assert_eq!(default_dir_for_settings(&s, "Games"), PathBuf::from("/ssd/Games"));
+    }
+
+    #[test]
+    fn validates_refresh_matching_and_expired_errors() {
+        assert!(is_expired_error("server returned 403 Forbidden"));
+        assert!(is_expired_error("server returned 410 Gone"));
+        assert!(is_expired_error("This link opens a web page, not a file"));
+        assert!(!is_expired_error("connection timed out"));
+
+        assert!(matches_refresh_target("ubuntu.iso", Some(1024), Some("different.iso"), Some(1024)).is_ok());
+        assert!(matches_refresh_target("ubuntu.iso", Some(1024), Some("ubuntu.iso"), Some(2048)).is_err());
+        assert!(matches_refresh_target("ubuntu.iso", Some(1024), Some("ubuntu.iso"), None).is_ok());
+        assert!(matches_refresh_target("ubuntu.iso", None, Some("UBUNTU.ISO"), None).is_ok());
+        assert!(matches_refresh_target("ubuntu.iso", None, Some("other.iso"), None).is_err());
     }
 }
 
@@ -1130,5 +1551,34 @@ mod video_default_tests {
         assert_eq!(clean_name("a/b: c*d?"), "a b c d");
         assert_eq!(clean_name("Version 2.0"), "Version 2.0", "a long tail after the dot isn't an extension");
         assert_eq!(clean_name("  "), "video");
+    }
+}
+
+#[cfg(test)]
+mod background_opt_tests {
+    use super::*;
+
+    #[test]
+    fn computes_adaptive_tick_waits() {
+        assert_eq!(compute_next_tick_wait(0, false, 0, 0, 1_000), None);
+        assert_eq!(compute_next_tick_wait(0, true, 0, 0, 1_000), Some(Duration::ZERO));
+        assert_eq!(compute_next_tick_wait(1, false, 0, 0, 1_000), Some(Duration::from_millis(500)));
+        assert_eq!(compute_next_tick_wait(1, true, 5_000, 9_000, 1_000), Some(Duration::from_millis(500)));
+        assert_eq!(compute_next_tick_wait(0, false, 6_000, 0, 1_000), Some(Duration::from_secs(5)));
+        assert_eq!(compute_next_tick_wait(0, false, 600_000, 0, 1_000), Some(Duration::from_secs(60)));
+        assert_eq!(compute_next_tick_wait(0, false, 90_000, 11_000, 1_000), Some(Duration::from_secs(10)));
+        assert_eq!(compute_next_tick_wait(0, false, 500, 0, 1_000), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn prunes_destroyed_window_maps() {
+        let mut windows = HashMap::from([(1, "dl-1".into()), (2, "dl-2".into())]);
+        let mut confirms = HashMap::from([(42, Incoming::default()), (43, Incoming::default())]);
+        prune_destroyed_window(&mut windows, &mut confirms, "dl-1");
+        prune_destroyed_window(&mut windows, &mut confirms, "new-42");
+        assert!(!windows.contains_key(&1));
+        assert!(windows.contains_key(&2));
+        assert!(!confirms.contains_key(&42));
+        assert!(confirms.contains_key(&43));
     }
 }
