@@ -6,6 +6,21 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-22
+
+### Added
+- **IDM-grade browser link & media capture:** Added Chromium `onDeterminingFilename` handoff (paired with Firefox `webRequestBlocking`), `Shift+Alt+Click` force capture, query-parameter MIME sniffing (`mime_type`, `.m3u8`/`.mpd`), event-driven playback detection, and a dockable bottom-right media bar with dismiss support.
+- **SoundCloud & TikTok improvements:** Added SoundCloud audio quality options, active feed video resolution on TikTok, and per-media `Referer`/`Origin`/`User-Agent` header forwarding from both the in-page bar and popup.
+
+### Changed
+- **Faster downloads:** Upgraded engine disk writes to 256 KiB async buffering with `TCP_NODELAY`, increased default parallel connections and HLS/DASH chunk concurrency to 16, and switched non-YouTube media probing to a single-pass flow.
+- **Refreshed desktop & extension UI:** Modernized the main window, download dialog, and extension popup layouts and styling.
+- **Faster, safer native-host IPC:** Skipped redundant refusal probes on already-confirmed browser downloads (`confirmed: true`) to protect single-use signed URLs, and switched cookie/header IPC to `0600`/`0700` temporary files under `data_dir/ipc` (validated and deleted on read) instead of process `argv`.
+
+### Fixed
+- Aligned `webRequest` resource types (`OBSERVED_TYPES`) so request headers (`Referer`, `Origin`, `User-Agent`), redirects, and responses correlate reliably across media/XHR traffic, dropping `Origin` across cross-origin redirects.
+- Prevented cross-origin cookie fallback leakage, closed an async deduplication race between `onCreated` and `onDeterminingFilename`, preserved signed CDN URLs without `encodeURI`/`decodeURI` mutation, and redacted sensitive query tokens in extension logs.
+
 ## [0.4.3] - 2026-11-22
 
 ### Changed

@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "motlydl-app"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "aes",
  "anyhow",
@@ -3402,7 +3402,7 @@ dependencies = [
 
 [[package]]
 name = "motlydl-cli"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -3414,7 +3414,7 @@ dependencies = [
 
 [[package]]
 name = "motlydl-engine"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "futures-util",
