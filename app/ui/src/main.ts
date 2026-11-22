@@ -156,12 +156,21 @@ function renderNav() {
 
   const active = state.items.filter((i) => i.status === "downloading");
   const queued = state.items.filter((i) => i.status === "queued").length;
+  const completed = state.items.filter((i) => i.status === "completed");
   const total = active.reduce((s, i) => s + (i.speed || 0), 0);
   const [v, u] = total > 0 ? parts(total) : ["0", "B"];
   $("net-speed").textContent = v;
   $("net-unit").textContent = `${u}/s`;
   const left = active.reduce((s, i) => s + Math.max(0, (i.size || 0) - i.downloaded), 0);
   $("net-foot").textContent = active.length ? `${active.length} active${queued ? `, ${queued} queued` : ""} · ${bytes(left)} left` : queued ? `${queued} queued` : "Idle";
+  const doneBytes = completed.reduce((s, i) => s + (i.size || i.downloaded || 0), 0);
+  const statsHtml = [
+    `<span class="stat-pill ${active.length ? "live" : ""}"><i></i><b>${active.length}</b> active</span>`,
+    queued ? `<span class="stat-pill"><b>${queued}</b> queued</span>` : "",
+    `<span class="stat-pill"><b>${completed.length}</b> done${doneBytes ? ` · ${bytes(doneBytes)}` : ""}</span>`,
+    total > 0 ? `<span class="stat-pill accent">${speed(total)}</span>` : "",
+  ].join("");
+  if ($("stats-strip").innerHTML !== statsHtml) $("stats-strip").innerHTML = statsHtml;
   const lim = state.settings?.speedLimitKib || 0;
   $("limit-btn").textContent = lim ? `≤ ${bytes(lim * 1024)}/s` : "No limit";
   $("limit-btn").classList.toggle("on", !!lim);
@@ -184,29 +193,56 @@ const rowEls = new Map<number, RowEl>(), headEls = new Map<string, HTMLDivElemen
 function makeRow(id: number): RowEl {
   const el = document.createElement("div") as RowEl;
   el.className = "row"; el.dataset.id = String(id);
-  el.innerHTML = `<span class="r-status"></span><div class="r-main"></div><div class="r-meta"></div>`;
-  el._c = [...el.children] as HTMLElement[]; el._k = [];
+  el.innerHTML = `<div class="r-ico"></div><div class="r-body"><div class="r-top"></div><div class="r-sub"></div></div><div class="r-acts"></div>`;
+  const body = el.children[1] as HTMLElement;
+  el._c = [el.children[0] as HTMLElement, body.children[0] as HTMLElement, body.children[1] as HTMLElement, el.children[2] as HTMLElement];
+  el._k = [];
   return el;
 }
 function set(el: RowEl, i: number, html: string) { if (el._k[i] !== html) { el._k[i] = html; el._c[i].innerHTML = html; } }
-function meta(it: Item) {
+function rowBadge(it: Item): string {
+  switch (it.status) {
+    case "downloading": return `<span class="r-badge dl">${icon("arrowDown")}<span>${it.speed > 0 ? speed(it.speed) : "Connecting…"}</span></span>`;
+    case "queued": return `<span class="r-badge queued"><span>Queued #${queuePos(it)}</span></span>`;
+    case "paused": return `<span class="r-badge paused">${icon("pause")}<span>Paused</span></span>`;
+    case "error": return `<span class="r-badge err">${icon("alert")}<span>Failed</span></span>`;
+    default: return `<span class="r-badge ok">${icon("check")}<span>Done</span></span>`;
+  }
+}
+function rowSub(it: Item): string {
   const p = Math.floor(pct(it));
-  const mini = (cls: string) => `<span class="mini ${cls}"><i style="width:${pct(it)}%"></i></span><span class="pct">${it.size ? p + "%" : ""}</span>`;
+  const barCls = it.status === "paused" ? "paused" : it.status === "queued" ? "queued" : it.status === "error" ? "error" : it.status === "completed" ? "done" : "";
+  const bar = it.status !== "completed" ? `<span class="mini ${barCls}"><i style="width:${pct(it)}%"></i></span>` : "";
+  const src = host(it.url);
   switch (it.status) {
     case "downloading":
-      return `${mini("")}<span class="m-size">${bytes(it.downloaded)} / ${bytes(it.size)}</span><span class="m-speed">${it.speed > 0 ? speed(it.speed) : "Connecting…"}</span><span class="m-eta">${dur(eta(it))}</span>`;
-    case "queued": return `${mini("queued")}<span class="m-size">${it.size ? bytes(it.size) : "—"}</span><span class="m-speed" style="color:var(--muted);font-weight:500">Queued · #${queuePos(it)}</span><span class="m-eta"></span>`;
-    case "paused": return `${mini("paused")}<span class="m-size">${bytes(it.downloaded)} / ${bytes(it.size)}</span><span class="m-speed" style="color:var(--amber);font-weight:500">Paused</span><span class="m-eta"></span>`;
-    case "error": return `<span class="m-size">${bytes(it.size)}</span><span class="m-when">${when(it.addedAt)}</span>`;
-    default: return `<span class="cat"><i style="background:${cat(it).color}"></i>${esc(it.category)}</span><span class="m-size">${bytes(it.size)}</span><span class="m-when">${when(it.completedAt)}</span>`;
+      return `${bar}<span class="r-stat">${bytes(it.downloaded)}${it.size ? ` / ${bytes(it.size)} · ${p}%` : ""}</span><span class="r-eta">${dur(eta(it))}${it.connections ? ` · ${it.connections} conn` : ""}</span>${src ? `<span class="r-host">${esc(src)}</span>` : ""}`;
+    case "queued":
+      return `${bar}<span class="r-stat">${it.size ? bytes(it.size) : "Waiting"}</span>${src ? `<span class="r-host">${esc(src)}</span>` : ""}`;
+    case "paused":
+      return `${bar}<span class="r-stat">${bytes(it.downloaded)}${it.size ? ` / ${bytes(it.size)} · ${p}%` : ""}</span>${src ? `<span class="r-host">${esc(src)}</span>` : ""}`;
+    case "error":
+      return `<span class="r-err" title="${esc(it.error || "Failed")}">${esc(it.error || "Download failed")}</span>${src ? `<span class="r-host">${esc(src)}</span>` : ""}`;
+    default:
+      return `<span class="cat"><i style="background:${cat(it).color}"></i>${esc(it.category)}</span><span class="r-stat">${bytes(it.size)}</span><span class="r-when">${when(it.completedAt)}</span>${src ? `<span class="r-host">${esc(src)}</span>` : ""}`;
   }
+}
+function rowActions(it: Item): string {
+  const primary = it.status === "completed"
+    ? `<button type="button" class="ra" data-row-act="open" title="Open file">${icon("open")}</button>`
+    : isActive(it)
+      ? `<button type="button" class="ra" data-row-act="pause" title="Pause">${icon("pause")}</button>`
+      : `<button type="button" class="ra" data-row-act="resume" title="${it.status === "error" ? "Retry" : "Resume"}">${icon(it.status === "error" ? "retry" : "play")}</button>`;
+  return `${primary}<button type="button" class="ra" data-row-act="folder" title="Show in folder">${icon("folder")}</button><button type="button" class="ra danger" data-row-act="delete" title="${it.status === "completed" ? "Remove" : "Cancel"}">${icon("trash")}</button>`;
 }
 function updateRow(el: RowEl, it: Item) {
   el.classList.toggle("sel", state.selected === it.id || state.picked.has(it.id));
-  set(el, 0, statusIcon(it));
+  el.classList.toggle("is-dl", it.status === "downloading");
+  set(el, 0, `${ftile(it)}<span class="r-dot">${statusIcon(it)}</span>`);
   const e = ext(it.filename);
-  set(el, 1, `<span class="r-name" title="${esc(it.filename)}">${esc(it.filename.replace(/\.[^.]+$/, "") || it.filename)}</span>${e ? `<span class="r-ext">${e}</span>` : ""}${it.status === "error" ? `<span class="r-err">${esc(it.error || "Failed")}</span>` : ""}`);
-  set(el, 2, meta(it));
+  set(el, 1, `<span class="r-name" title="${esc(it.filename)}">${esc(it.filename.replace(/\.[^.]+$/, "") || it.filename)}</span>${e ? `<span class="r-ext">${e}</span>` : ""}${rowBadge(it)}`);
+  set(el, 2, rowSub(it));
+  set(el, 3, rowActions(it));
 }
 function renderList() {
   const list = visible();
@@ -580,6 +616,12 @@ document.addEventListener("contextmenu", (e) => { if (!target(e).closest<HTMLEle
 // are replaced every half second, and "dblclick" doesn't fire when the
 // element under the first click is gone by the second.
 $("rows").addEventListener("click", async (e) => {
+  const actBtn = target(e).closest<HTMLElement>("[data-row-act]");
+  if (actBtn) {
+    const r = target(e).closest<HTMLElement>(".row"), it = r ? byId(Number(r.dataset.id)) : undefined;
+    if (it) act(actBtn.dataset.rowAct!, it, actBtn);
+    return;
+  }
   if (!target(e).closest<HTMLElement>("[data-clear]")) return;
   const ids = state.items.filter((i) => i.status === "completed").map((i) => i.id);
   if (!ids.length) return;
@@ -587,6 +629,7 @@ $("rows").addEventListener("click", async (e) => {
   toast(`Cleared ${ids.length} from the list`, "ok");
 });
 $("rows").addEventListener("mousedown", (e) => {
+  if (target(e).closest<HTMLElement>("[data-row-act]")) return;
   const r = target(e).closest<HTMLElement>(".row"), it = r ? byId(Number(r.dataset.id)) : undefined;
   if (!it || e.button !== 0) return;
   if (e.detail === 2) { if (it.status === "completed") act("open", it); else toggle(it); return; }
@@ -620,7 +663,33 @@ $("nav").addEventListener("click", (e) => {
 });
 $("btn-pause-all").onclick = () => pause(visible().filter(isActive).map((i) => i.id));
 $("btn-resume-all").onclick = () => resume(visible().filter((i: Item) => i.status === "paused" || i.status === "error").map((i) => i.id));
-$("btn-add").onclick = $("empty-add").onclick = () => openComposer();
+$("btn-add").onclick = $("btn-add-main").onclick = $("empty-add").onclick = () => openComposer();
+async function submitQuickUrl(rawText?: string) {
+  const raw = (rawText ?? $("quick-url").value).trim();
+  if (!raw) { $("quick-url").focus(); return; }
+  if (/\s/.test(raw) || /\[\d+-\d+\]/.test(raw)) {
+    const n = await invoke("add_links", { text: raw }).catch(() => 0);
+    if (!n) return toast("No links found in what you entered", "err");
+    $("quick-url").value = "";
+    if (state.view !== "all" && state.view !== "active") state.view = "all";
+    toast(`Adding ${n} download${n === 1 ? "" : "s"}`, "dl");
+    return;
+  }
+  const url = firstUrl(raw);
+  if (!url) return toast("Paste a valid link (http://, https://, or magnet:)", "err");
+  $("quick-url").value = "";
+  if (await invoke("is_playlist_url", { url }).catch(() => false)) { openPlaylist(url); return; }
+  const special = await invoke("is_media_url", { url }).catch(() => false) || await invoke("is_torrent_url", { url, filename: null }).catch(() => false);
+  if (special) { invoke("open_new_download", { url }); return; }
+  openComposer({ url });
+}
+$("quick-form").addEventListener("submit", (e) => { e.preventDefault(); void submitQuickUrl(); });
+$("quick-paste").onclick = async () => {
+  const txt = await (navigator.clipboard?.readText?.() || Promise.resolve("")).catch(() => "");
+  if (!txt.trim()) return toast("No link on the clipboard");
+  $("quick-url").value = txt.trim();
+  void submitQuickUrl(txt);
+};
 $("btn-palette").onclick = $("btn-search").onclick = () => openPalette();
 $("btn-settings").onclick = () => openSettings();
 $("empty-ext").onclick = () => openExtensionGuide();
@@ -817,7 +886,7 @@ function renderChips() {
   $("add-chips").innerHTML = i ? [
     `<span class="chip">${icon("hash")}<span>${i.size != null ? bytes(i.size) : "Unknown size"}</span></span>`,
     `<span class="chip"><i class="dot" style="background:${(CATS[i.category] || CATS.Other).color}"></i><span>${esc(i.category)}</span></span>`,
-    i.resumable ? `<span class="chip ok">${icon("bolt")}<span>${state.settings?.connections || 8} connections</span></span>` : `<span class="chip warn">${icon("info")}<span>Single connection, no resume</span></span>`,
+    i.resumable ? `<span class="chip ok">${icon("bolt")}<span>${state.settings?.connections || 16} connections</span></span>` : `<span class="chip warn">${icon("info")}<span>Single connection, no resume</span></span>`,
     `<button type="button" class="chip" id="add-folder" title="${esc(add.dir)}">${icon("folder")}<span>${esc(folder)}</span>${icon("chevDown")}</button>`,
   ].join("") : "";
 }

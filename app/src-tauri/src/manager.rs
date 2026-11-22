@@ -92,6 +92,8 @@ pub struct Incoming {
     #[serde(default)]
     pub referrer: Option<String>,
     #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
     pub cookies: Option<String>,
     #[serde(default)]
     pub user_agent: Option<String>,
@@ -126,6 +128,9 @@ impl Incoming {
         }
         if let Some(r) = self.referrer.as_ref().filter(|r| !r.is_empty()) {
             h.push(("Referer".into(), r.clone()));
+        }
+        if let Some(o) = self.origin.as_ref().filter(|o| !o.is_empty()) {
+            h.push(("Origin".into(), o.clone()));
         }
         if let Some(u) = self.user_agent.as_ref().filter(|u| !u.is_empty()) {
             h.push(("User-Agent".into(), u.clone()));

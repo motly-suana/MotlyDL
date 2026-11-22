@@ -20,8 +20,11 @@ use tokio_util::sync::CancellationToken;
 /// Never split a segment into halves smaller than this; a new connection's
 /// handshake costs more than it saves below ~512 KiB.
 const MIN_SPLIT_HALF: u64 = 512 * 1024;
+/// Accumulate network chunks into 256 KiB blocks before writing to disk so
+/// Windows NTFS / Defender aren't hit with thousands of tiny random writes.
+const WRITE_BUF: usize = 256 * 1024;
 const MAX_RETRIES: u32 = 8;
-const SAVE_EVERY: Duration = Duration::from_secs(1);
+const SAVE_EVERY: Duration = Duration::from_secs(3);
 
 pub struct Request {
     pub url: String,
@@ -72,6 +75,7 @@ struct Shared {
     table: Mutex<Table>,
     progress: Arc<Progress>,
     limiter: Arc<SpeedLimiter>,
+    cancel: CancellationToken,
 }
 
 struct Table {
@@ -154,8 +158,9 @@ pub fn build_client_opts(proxy: &str, bind: &str) -> Result<Client> {
         // one congestion window, which defeats the point. Force HTTP/1.1 so
         // each segment gets its own TCP connection.
         .http1_only()
+        .tcp_nodelay(true)
         .pool_idle_timeout(Duration::from_secs(30))
-        .pool_max_idle_per_host(4)
+        .pool_max_idle_per_host(16)
         .user_agent(concat!("motlydl/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(30))
@@ -240,6 +245,7 @@ async fn download_segmented(
         }),
         progress: progress.clone(),
         limiter,
+        cancel: cancel.clone(),
     });
     shared.publish(size);
 
@@ -264,8 +270,9 @@ async fn download_segmented(
             for n in 0u64.. {
                 tick.tick().await;
                 shared.publish(size);
-                if n % (SAVE_EVERY.as_millis() as u64 / 250) == 0 {
-                    let _ = save();
+                if n > 0 && n % (SAVE_EVERY.as_millis() as u64 / 250) == 0 {
+                    let save = save.clone();
+                    let _ = tokio::task::spawn_blocking(move || save()).await;
                 }
             }
         })
@@ -276,32 +283,40 @@ async fn download_segmented(
         workers.spawn(worker(shared.clone(), id));
     }
 
-    let result: Result<bool> = tokio::select! {
-        r = async {
-            while let Some(res) = workers.join_next().await {
-                res??;
+    let mut result: Result<()> = Ok(());
+    while let Some(res) = workers.join_next().await {
+        match res {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                if !shared.cancel.is_cancelled() && result.is_ok() {
+                    result = Err(e);
+                    shared.cancel.cancel();
+                }
             }
-            Ok(true)
-        } => r,
-        _ = cancel.cancelled() => Ok(false),
-    };
+            Err(e) => {
+                if result.is_ok() {
+                    result = Err(e.into());
+                    shared.cancel.cancel();
+                }
+            }
+        }
+    }
 
-    workers.shutdown().await;
     background.abort();
     let _ = background.await;
     progress.connections.store(0, Ordering::Relaxed);
     shared.publish(size);
 
+    if cancel.is_cancelled() {
+        save()?;
+        return Ok(Outcome::Paused);
+    }
     match result {
-        Ok(true) if shared.remaining_bytes() == 0 => {
-            shared.file.sync_all()?;
+        Ok(()) if shared.remaining_bytes() == 0 => {
+            tokio::task::spawn_blocking(move || shared.file.sync_all()).await??;
             Ok(Outcome::Completed)
         }
-        Ok(true) => bail!("workers finished but data is missing (this is a bug)"),
-        Ok(false) => {
-            save()?;
-            Ok(Outcome::Paused)
-        }
+        Ok(()) => bail!("workers finished but data is missing (this is a bug)"),
         Err(e) => {
             save()?;
             Err(e)
@@ -322,7 +337,8 @@ async fn usable_mirrors(client: &Client, req: &Request, size: u64) -> Vec<String
 /// One connection's life: take a segment, download it, take another (or
 /// steal half of someone else's), until there is nothing worth taking.
 async fn worker(shared: Arc<Shared>, id: usize) -> Result<()> {
-    while let Some(seg) = shared.claim() {
+    while !shared.cancel.is_cancelled() {
+        let Some(seg) = shared.claim() else { break };
         shared.progress.connections.fetch_add(1, Ordering::Relaxed);
         let result = download_segment(&shared, &seg, id).await;
         shared.progress.connections.fetch_sub(1, Ordering::Relaxed);
@@ -334,9 +350,9 @@ async fn worker(shared: Arc<Shared>, id: usize) -> Result<()> {
 /// Downloads one segment, reconnecting from where it left off on errors.
 /// The retry counter resets whenever an attempt makes progress, so only a
 /// connection that is truly stuck gives up.
-async fn download_segment(shared: &Shared, seg: &Segment, id: usize) -> Result<()> {
+async fn download_segment(shared: &Arc<Shared>, seg: &Arc<Segment>, id: usize) -> Result<()> {
     let mut failures = 0u32;
-    loop {
+    while !shared.cancel.is_cancelled() {
         let (pos, end) = seg.range();
         if pos >= end {
             return Ok(());
@@ -344,6 +360,9 @@ async fn download_segment(shared: &Shared, seg: &Segment, id: usize) -> Result<(
         // Each connection has its own server; after a failure, the next one.
         let url = &shared.urls[(id + failures as usize) % shared.urls.len()];
         let result = fetch_range(shared, url, seg, pos, end).await;
+        if shared.cancel.is_cancelled() {
+            return Ok(());
+        }
         let progressed = seg.range().0 > pos;
         if progressed {
             failures = 0;
@@ -365,30 +384,77 @@ async fn download_segment(shared: &Shared, seg: &Segment, id: usize) -> Result<(
             }
         }
         let backoff = Duration::from_millis(250 * 2u64.pow(failures.min(5)));
-        tokio::time::sleep(backoff).await;
+        tokio::select! {
+            _ = tokio::time::sleep(backoff) => {}
+            _ = shared.cancel.cancelled() => return Ok(()),
+        }
     }
+    Ok(())
 }
 
-async fn fetch_range(shared: &Shared, url: &str, seg: &Segment, pos: u64, end: u64) -> Result<()> {
-    let resp = shared
-        .client
-        .get(url)
-        .headers(shared.headers.clone())
-        .header(header::RANGE, format!("bytes={}-{}", pos, end - 1))
-        .send()
-        .await?;
+async fn flush_buf(shared: &Arc<Shared>, seg: &Arc<Segment>, mut buf: Vec<u8>) -> Result<(bool, Vec<u8>)> {
+    if buf.is_empty() {
+        let (p, e) = seg.range();
+        return Ok((p < e, buf));
+    }
+    let shared = shared.clone();
+    let seg = seg.clone();
+    tokio::task::spawn_blocking(move || {
+        let keep_going = seg.write(&shared.file, &buf)?;
+        buf.clear();
+        Ok((keep_going, buf))
+    })
+    .await?
+}
+
+async fn fetch_range(shared: &Arc<Shared>, url: &str, seg: &Arc<Segment>, pos: u64, end: u64) -> Result<()> {
+    let resp = tokio::select! {
+        r = shared
+            .client
+            .get(url)
+            .headers(shared.headers.clone())
+            .header(header::RANGE, format!("bytes={}-{}", pos, end - 1))
+            .send() => r?,
+        _ = shared.cancel.cancelled() => return Ok(()),
+    };
     if resp.status() != StatusCode::PARTIAL_CONTENT {
         bail!("expected 206 for a range request, got {}", resp.status());
     }
     let mut body = resp.bytes_stream();
-    while let Some(chunk) = body.next().await {
-        let chunk = chunk?;
+    let mut buf = Vec::with_capacity(WRITE_BUF);
+    let mut last_flush = std::time::Instant::now();
+    loop {
+        let chunk = tokio::select! {
+            c = body.next() => c,
+            _ = shared.cancel.cancelled() => {
+                let _ = flush_buf(shared, seg, buf).await;
+                return Ok(());
+            }
+        };
+        let Some(chunk) = chunk else {
+            let _ = flush_buf(shared, seg, buf).await?;
+            return Ok(());
+        };
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = flush_buf(shared, seg, buf).await;
+                return Err(e.into());
+            }
+        };
         shared.limiter.take(chunk.len()).await;
-        if !seg.write(&shared.file, &chunk)? {
-            break; // segment complete (or its tail was stolen): hang up
+        buf.extend_from_slice(&chunk);
+        let (cur_pos, cur_end) = seg.range();
+        let reaches_end = cur_pos.saturating_add(buf.len() as u64) >= cur_end;
+        if buf.len() >= WRITE_BUF || reaches_end || last_flush.elapsed() >= Duration::from_millis(250) {
+            let (keep_going, reused) = flush_buf(shared, seg, buf).await?;
+            buf = reused;
+            last_flush = std::time::Instant::now();
+            if !keep_going {
+                return Ok(());
+            }
         }
     }
-    Ok(())
 }
 
 /// Fallback for servers without range support: one plain sequential stream.
@@ -404,7 +470,7 @@ async fn download_single(
 ) -> Result<Outcome> {
     use std::io::Write;
     let resp = client.get(&remote.url).headers(req.headers.clone()).send().await?.error_for_status()?;
-    let mut file = std::io::BufWriter::new(File::create(part)?);
+    let mut file = std::io::BufWriter::with_capacity(WRITE_BUF, File::create(part)?);
     let mut body = resp.bytes_stream();
     progress.downloaded.store(0, Ordering::Relaxed);
     progress.connections.store(1, Ordering::Relaxed);

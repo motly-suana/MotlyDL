@@ -88,6 +88,7 @@ export interface Incoming {
   url: string;
   filename?: string | null;
   referrer?: string | null;
+  origin?: string | null;
   cookies?: string | null;
   userAgent?: string | null;
   pageUrl?: string | null;

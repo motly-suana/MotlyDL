@@ -1,32 +1,32 @@
 /* A compact menu in the app's tokens (app/ui/styles.css): no boxes or
    dividers between sections, single-line rows, one accent for switches. */
 :root {
-  --bg: #ffffff; --hover: rgba(15, 15, 25, .045);
-  --border: rgba(15, 15, 25, .08);
-  --text: #17171c; --muted: #6c6e78; --faint: #a2a4ad;
-  --accent: #007aff; --track: rgba(15, 15, 25, .14);
-  --btn-bg: rgba(15, 15, 25, .055); --btn-hover: rgba(15, 15, 25, .09);
-  --green: #23864f; --red: #cf4540; --kbd-bg: rgba(15, 15, 25, .06);
+  --bg: #f8fafc; --hover: rgba(15, 23, 42, .05);
+  --border: rgba(15, 23, 42, .10);
+  --text: #0f172a; --muted: #475569; --faint: #64748b;
+  --accent: #0284c7; --accent-2: #6366f1; --track: rgba(15, 23, 42, .14);
+  --btn-bg: rgba(15, 23, 42, .06); --btn-hover: rgba(15, 23, 42, .10);
+  --green: #16a34a; --red: #dc2626; --kbd-bg: rgba(15, 23, 42, .07);
   --font: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
   --font-display: "Segoe UI Variable Display", "Segoe UI", -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #101114; --hover: rgba(255, 255, 255, .045);
-    --border: rgba(255, 255, 255, .07);
-    --text: #eef0f3; --muted: #8a8e98; --faint: #5c6069;
-    --accent: #0a84ff; --track: rgba(255, 255, 255, .14);
-    --btn-bg: rgba(255, 255, 255, .07); --btn-hover: rgba(255, 255, 255, .11);
-    --green: #3fa877; --red: #e0605a; --kbd-bg: rgba(255, 255, 255, .07);
+    --bg: #0f141f; --hover: rgba(148, 163, 184, .08);
+    --border: rgba(148, 163, 184, .14);
+    --text: #f1f5f9; --muted: #94a3b8; --faint: #64748b;
+    --accent: #38bdf8; --accent-2: #818cf8; --track: rgba(148, 163, 184, .18);
+    --btn-bg: rgba(148, 163, 184, .10); --btn-hover: rgba(148, 163, 184, .16);
+    --green: #34d399; --red: #f87171; --kbd-bg: rgba(148, 163, 184, .12);
     color-scheme: dark;
   }
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; width: 300px; font: 450 13px/1.4 var(--font); letter-spacing: -.003em; background: var(--bg); color: var(--text); user-select: none; -webkit-font-smoothing: antialiased; }
-button, select { font: inherit; color: inherit; letter-spacing: inherit; }
+body { margin: 0; width: 320px; font: 450 13px/1.4 var(--font); letter-spacing: -.003em; background: var(--bg); color: var(--text); user-select: none; -webkit-font-smoothing: antialiased; }
+button, select { font: inherit; color: inherit; letter-spacing: inherit; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
 
 header { display: flex; align-items: center; gap: 10px; padding: 14px 12px 12px 16px; }

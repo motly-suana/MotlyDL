@@ -148,16 +148,18 @@
     settings = {},
     now = Date.now(),
     bypassUntil = 0,
+    forceUntil = 0,
     handedBack = null,
     browserOnce = null,
   }) {
-    if (!settings.enabled) return { skip: true, reason: "disabled" };
     if (isBrowserInternalUrl(url, byExtensionId)) {
       return { skip: true, reason: "browser-internal" };
     }
     if (now < bypassUntil) {
       return { skip: true, reason: "alt-bypass", clearBypass: true };
     }
+    const forced = now < forceUntil;
+    if (!settings.enabled && !forced) return { skip: true, reason: "disabled" };
 
     const candidates = [rawUrl, finalUrl, url].map(baseUrl).filter(Boolean);
     if (browserOnce && candidates.some((u) => (browserOnce.get(u) || 0) > now)) {
@@ -172,16 +174,16 @@
 
     const disabledSites = Array.isArray(settings.disabledSites) ? settings.disabledSites : [];
     const hosts = [pageUrl, referrer, url].map(hostOf).filter(Boolean);
-    if (hosts.some((h) => disabledSites.includes(h))) {
+    if (!forced && hosts.some((h) => disabledSites.includes(h))) {
       return { skip: true, reason: "site-disabled" };
     }
 
     const minBytes = (Number(settings.minSizeKB) || 0) * 1024;
-    if (minBytes > 0 && sizeBytes > 0 && sizeBytes < minBytes) {
+    if (!forced && minBytes > 0 && sizeBytes > 0 && sizeBytes < minBytes) {
       return { skip: true, reason: "below-threshold" };
     }
 
-    return { skip: false, reason: "capture" };
+    return { skip: false, reason: forced ? "forced" : "capture", clearForce: forced };
   }
 
   /**
@@ -222,9 +224,11 @@
     return {
       recordRequestHeaders(requestId, url, headers, pageUrl = "", now = Date.now()) {
         const referer = headerValue(headers, "referer");
+        const origin = headerValue(headers, "origin");
         const userAgent = headerValue(headers, "user-agent");
         const patch = {};
         if (referer) patch.referer = referer;
+        if (origin && /^https?:/i.test(origin)) patch.origin = origin;
         if (userAgent) patch.userAgent = userAgent;
         if (pageUrl && /^https?:/i.test(pageUrl)) patch.pageUrl = pageUrl;
         upsert(requestId, url, patch, now);
@@ -232,17 +236,35 @@
 
       recordRedirect(requestId, fromUrl, toUrl, now = Date.now()) {
         const prev = (requestId && byReqId.get(requestId)) || byUrl.get(fromUrl) || {};
-        upsert(requestId, toUrl, prev, now);
+        let sameOrigin = false;
+        try {
+          sameOrigin = new URL(fromUrl).origin === new URL(toUrl).origin;
+        } catch {}
+        const nextPatch = {
+          referer: prev.referer,
+          userAgent: prev.userAgent,
+          pageUrl: prev.pageUrl,
+          origin: sameOrigin ? prev.origin : undefined,
+        };
+        upsert(requestId, toUrl, nextPatch, now);
       },
 
-      recordResponseHeaders(requestId, url, headers, now = Date.now()) {
-        const filename = parseContentDisposition(headerValue(headers, "content-disposition"));
+      recordResponseHeaders(requestId, url, headers, now = Date.now(), statusCode = 0) {
+        const disp = headerValue(headers, "content-disposition");
+        const filename = parseContentDisposition(disp);
         const contentType = headerValue(headers, "content-type").split(";")[0].trim().toLowerCase();
         const len = Number(headerValue(headers, "content-length"));
         const patch = {};
         if (filename) patch.filename = filename;
         if (contentType) patch.contentType = contentType;
         if (Number.isFinite(len) && len > 0) patch.contentLength = len;
+        if (statusCode) patch.statusCode = statusCode;
+        if (
+          (statusCode === 200 || statusCode === 206) &&
+          (/^attachment\b/i.test(disp.trim()) || DOWNLOAD_MIME.has(contentType) || /^(video|audio)\//i.test(contentType))
+        ) {
+          patch.confirmedDownload = true;
+        }
         upsert(requestId, url, patch, now);
       },
 
@@ -264,12 +286,79 @@
     };
   }
 
+  const MEDIA_EXT = /\.(mp4|m4v|webm|mkv|mov|avi|flv|wmv|mp3|m4a|aac|ogg|oga|opus|flac|wav)(?:$|[?#])/i;
+  const CHUNK_EXT = /\.(ts|m4s|aac|vtt|srt)(?:$|[?#])/i;
+  const RANGE_QUERY = /[?&](?:range|bytestart|byteend|rn|rbuf)=[^&#]*/gi;
+  const MIME_HINT_PARAMS = ["mime", "mime_type", "type", "format", "ct"];
+  const SENSITIVE_PARAMS = /^(?:token|sig|signature|expires|expiry|key|auth|policy|credential|cookie|x-amz-signature|x-amz-security-token)$/i;
+  const MIN_MEDIA_BYTES = 128 * 1024;
+
+  function redactUrl(url) {
+    if (typeof url !== "string") return "";
+    try {
+      const u = new URL(url);
+      for (const [k] of [...u.searchParams.entries()]) {
+        if (SENSITIVE_PARAMS.test(k)) u.searchParams.set(k, "***");
+      }
+      return u.toString();
+    } catch {
+      return url;
+    }
+  }
+
+  function stripRangeParams(url) {
+    if (typeof url !== "string") return "";
+    return url
+      .replace(/([?&])(range|bytestart|byteend|rn|rbuf)=[^&#]*/gi, "$1")
+      .replace(/[?&]+$/, "")
+      .replace(/\?&/, "?");
+  }
+
+  function queryMimeHint(url) {
+    try {
+      const u = new URL(url);
+      for (const p of MIME_HINT_PARAMS) {
+        const val = (u.searchParams.get(p) || "").trim().toLowerCase();
+        if (!val) continue;
+        if (/m3u8|mpegurl/.test(val)) return "hls";
+        if (/mpd|dash/.test(val)) return "dash";
+        if (/^(?:video|audio)(?:\/|_)[a-z0-9.+-]+$/i.test(val) || /^(?:mp4|m4v|webm|mp3|m4a|opus|ogg|aac|flac)$/.test(val)) {
+          return "file";
+        }
+      }
+      if ([...u.searchParams.values()].some((v) => /\.m3u8(?:$|[?#])/i.test(v))) return "hls";
+      if ([...u.searchParams.values()].some((v) => /\.mpd(?:$|[?#])/i.test(v))) return "dash";
+    } catch {}
+    return null;
+  }
+
+  function classifyMedia(url, mime = "", size = 0, hasContentRange = false) {
+    if (typeof url !== "string" || !/^https?:/i.test(url)) return null;
+    if (/mpegurl/i.test(mime) || /\.m3u8(?:$|[?#])/i.test(url)) return "hls";
+    if (/dash\+xml/i.test(mime) || /\.mpd(?:$|[?#])/i.test(url)) return "dash";
+    if (/mp2t|^text\/vtt/i.test(mime) || CHUNK_EXT.test(url)) return null;
+    const hint = (!mime || mime === "application/octet-stream" || mime === "binary/octet-stream") ? queryMimeHint(url) : null;
+    if (hint === "hls" || hint === "dash") return hint;
+    const isMedia = /^(video|audio)\//i.test(mime) || MEDIA_EXT.test(url) || hint === "file";
+    if (!isMedia) return null;
+    if (RANGE_QUERY.test(url)) {
+      RANGE_QUERY.lastIndex = 0;
+      if (!hasContentRange || (size > 0 && size < MIN_MEDIA_BYTES)) return null;
+    }
+    RANGE_QUERY.lastIndex = 0;
+    if (size && size < MIN_MEDIA_BYTES) return null;
+    return "file";
+  }
+
   const api = {
     parseContentDisposition,
     isBrowserInternalUrl,
     isDownloadableResponse,
     shouldSkipCapture,
     createMetaStore,
+    stripRangeParams,
+    classifyMedia,
+    redactUrl,
   };
 
   root.MotlyDLCapture = api;

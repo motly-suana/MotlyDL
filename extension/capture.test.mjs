@@ -143,3 +143,80 @@ test("correlates request headers, redirects, and response headers within TTL and
   // Expires after TTL
   assert.equal(store.lookup("https://cdn.example/token123", null, null, 20_000), null);
 });
+
+test("classifies SoundCloud HLS/MP3 and TikTok range-fetched MP4 without dropping chunks prematurely", () => {
+  assert.equal(
+    CAP.classifyMedia("https://cf-hls-media.sndcdn.com/playlist/abc.128.m3u8?Policy=1", "application/vnd.apple.mpegurl", 0, false),
+    "hls",
+  );
+  assert.equal(
+    CAP.classifyMedia("https://cf-media.sndcdn.com/track.mp3", "audio/mpeg", 320_000, false),
+    "file",
+  );
+  assert.equal(
+    CAP.classifyMedia("https://v16-webapp-prime.tiktok.com/video/tos/useast2a/v1/?mime_type=video_mp4&bytestart=0&byteend=65535", "video/mp4", 2_400_000, true),
+    "file",
+  );
+  assert.equal(
+    CAP.stripRangeParams("https://v16-webapp-prime.tiktok.com/video/tos/?mime=video_mp4&bytestart=0&rn=2"),
+    "https://v16-webapp-prime.tiktok.com/video/tos/?mime=video_mp4",
+  );
+  assert.equal(
+    CAP.classifyMedia("https://cdn.example/seg-12.m4s", "video/iso.segment", 500_000, false),
+    null,
+  );
+  assert.equal(
+    CAP.classifyMedia("https://cdn.example/ping.mp3", "audio/mpeg", 16_000, false),
+    null,
+  );
+  assert.equal(
+    CAP.classifyMedia("https://cdn.example/blob?mime_type=video_mp4&id=1", "application/octet-stream", 2_000_000, false),
+    "file",
+  );
+  assert.equal(
+    CAP.classifyMedia("https://cdn.example/play?src=master.m3u8", "text/plain", 0, false),
+    "hls",
+  );
+});
+
+test("tracks origin/confirmedDownload in metaStore, supports forceUntil, and redacts sensitive query tokens", () => {
+  const store = CAP.createMetaStore({ maxEntries: 10, ttlMs: 10_000 });
+  store.recordRequestHeaders(
+    "req-m",
+    "https://origin-a.example/media",
+    [{ name: "Origin", value: "https://site.example" }, { name: "Referer", value: "https://site.example/" }],
+    "https://site.example/watch",
+    1000,
+  );
+  store.recordResponseHeaders(
+    "req-m",
+    "https://origin-a.example/media",
+    [{ name: "Content-Type", value: "application/zip" }, { name: "Content-Disposition", value: 'attachment; filename="pack.zip"' }],
+    1050,
+    200,
+  );
+  const metaA = store.lookup("https://origin-a.example/media", null, "req-m", 1100);
+  assert.equal(metaA.origin, "https://site.example");
+  assert.equal(metaA.confirmedDownload, true);
+
+  store.recordRedirect("req-m", "https://origin-a.example/media", "https://cdn-b.other/file.zip", 1200);
+  const metaB = store.lookup("https://cdn-b.other/file.zip", null, "req-m", 1250);
+  assert.equal(metaB.origin, undefined, "cross-origin redirect drops previous Origin header");
+  assert.equal(metaB.referer, "https://site.example/");
+
+  const forced = CAP.shouldSkipCapture({
+    url: "https://cdn.example/tiny.zip",
+    pageUrl: "https://skip.example/dl",
+    sizeBytes: 10_000,
+    settings: { enabled: false, minSizeKB: 1024, disabledSites: ["skip.example"] },
+    now: 2000,
+    forceUntil: 5000,
+  });
+  assert.equal(forced.skip, false);
+  assert.equal(forced.clearForce, true);
+
+  assert.equal(
+    CAP.redactUrl("https://cdn.example/v.mp4?token=secret123&sig=abc&itag=22"),
+    "https://cdn.example/v.mp4?token=***&sig=***&itag=22",
+  );
+});

@@ -52,17 +52,20 @@ async function cookieHeader(url) {
   }
 }
 
-async function sendToApp({ url, referrer, pageUrl, filename, contentType, contentLength, userAgent, qualities, pick }) {
+async function sendToApp({ url, referrer, origin, pageUrl, filename, contentType, contentLength, userAgent, qualities, pick, confirmed }) {
+  const cookies = await cookieHeader(url);
   const message = {
     type: "download",
     url,
     referrer: referrer || "",
+    origin: origin || "",
     pageUrl: pageUrl || referrer || "",
     filename: filename ? filename.split(/[\\/]/).pop() : "",
     contentType: contentType || null,
     contentLength: contentLength > 0 ? contentLength : null,
-    cookies: await cookieHeader(url),
+    cookies,
     userAgent: userAgent || navigator.userAgent,
+    confirmed: Boolean(confirmed),
     // A video's qualities, read from the page, so the app needn't look them up.
     ...(qualities ? { qualities, pick } : {}),
   };
@@ -93,8 +96,11 @@ function flashBadge(text, color, tabId) {
 
 // ---------- catching browser downloads ----------
 
-// Hold Alt while clicking a link to let the browser download it instead.
+// Hold Alt while clicking a link to let the browser download it instead;
+// hold Shift+Alt to force MotlyDL capture regardless of size/site rules.
 let bypassUntil = 0;
+let forceUntil = 0;
+const handledDownloadIds = new Map();
 
 async function siteDisabled(url) {
   const { disabledSites } = await getSettings();
@@ -173,13 +179,15 @@ function addWebRequestListener(event, listener, filter, primaryExtra, fallbackEx
   }
 }
 
+const OBSERVED_TYPES = ["main_frame", "sub_frame", "other", "media", "xmlhttprequest", "object"];
+
 addWebRequestListener(
   chrome.webRequest.onBeforeSendHeaders,
   (d) => {
     if (!cachedSettings.enabled) return;
     metaStore.recordRequestHeaders(d.requestId, d.url, d.requestHeaders, d.documentUrl || d.initiator || "");
   },
-  { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "other"] },
+  { urls: ["http://*/*", "https://*/*"], types: OBSERVED_TYPES },
   ["requestHeaders", "extraHeaders"],
   ["requestHeaders"],
 );
@@ -189,7 +197,7 @@ chrome.webRequest.onBeforeRedirect.addListener(
     if (!cachedSettings.enabled) return;
     metaStore.recordRedirect(d.requestId, d.url, d.redirectUrl);
   },
-  { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "other"] },
+  { urls: ["http://*/*", "https://*/*"], types: OBSERVED_TYPES },
 );
 
 addWebRequestListener(
@@ -197,10 +205,10 @@ addWebRequestListener(
   (d) => {
     if (!cachedSettings.enabled) return;
     if (d.statusCode >= 200 && d.statusCode < 400) {
-      metaStore.recordResponseHeaders(d.requestId, d.url, d.responseHeaders);
+      metaStore.recordResponseHeaders(d.requestId, d.url, d.responseHeaders, Date.now(), d.statusCode);
     }
   },
-  { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "other"] },
+  { urls: ["http://*/*", "https://*/*"], types: OBSERVED_TYPES },
   ["responseHeaders", "extraHeaders"],
   ["responseHeaders"],
 );
@@ -235,11 +243,12 @@ if (firefoxBlocking) {
         settings: cachedSettings,
         now: Date.now(),
         bypassUntil,
+        forceUntil,
         handedBack,
         browserOnce,
       });
       if (quickSkip.skip) {
-        log(`ff skipped (${quickSkip.reason}) ${d.url}`);
+        log(`ff skipped (${quickSkip.reason}) ${CAP.redactUrl(d.url)}`);
         return {};
       }
 
@@ -255,28 +264,32 @@ if (firefoxBlocking) {
           settings,
           now: Date.now(),
           bypassUntil,
+          forceUntil,
           handedBack: persistedHanded,
           browserOnce,
         });
         if (skipCheck.skip) {
           if (skipCheck.clearBypass) bypassUntil = 0;
-          await log(`ff skipped (${skipCheck.reason}) ${d.url}`);
+          await log(`ff skipped (${skipCheck.reason}) ${CAP.redactUrl(d.url)}`);
           return {};
         }
+        if (skipCheck.clearForce) forceUntil = 0;
         try {
           await sendToApp({
             url: d.url,
             referrer,
+            origin: meta?.origin || "",
             pageUrl,
             filename: decision.filename || meta?.filename || "",
             contentType: decision.contentType,
             contentLength: decision.contentLength,
             userAgent: meta?.userAgent || navigator.userAgent,
+            confirmed: true,
           });
           const now = Date.now();
           pruneExpired(recentIntercepted, now);
           recentIntercepted.set(d.url.split("#")[0], now + 15_000);
-          await log(`ff handed to MotlyDL: ${d.url}`);
+          await log(`ff handed to MotlyDL: ${CAP.redactUrl(d.url)}`);
           flashBadge("✓", "#2f9e6a", d.tabId >= 0 ? d.tabId : undefined);
           return { cancel: true };
         } catch (err) {
@@ -293,18 +306,43 @@ if (firefoxBlocking) {
   );
 }
 
-chrome.downloads.onCreated.addListener(async (item) => {
+async function interceptChromeDownload(item, fromDetermining = false) {
+  const now = Date.now();
+  pruneExpired(handledDownloadIds, now);
+  if ((handledDownloadIds.get(item.id) || 0) > now) return;
+
   const settings = await getSettings();
   const url = item.finalUrl || item.url;
-  await log(`created #${item.id} state=${item.state} ${url}`);
-  if (item.state !== "in_progress") return;
+  if (item.state && item.state !== "in_progress") return;
   const recentExpiry = recentIntercepted.get(url.split("#")[0]) || recentIntercepted.get((item.url || "").split("#")[0]) || 0;
   if (recentExpiry > Date.now()) {
-    await log(`#${item.id} already handled by blocking webRequest`);
+    handledDownloadIds.set(item.id, Date.now() + 60_000);
+    await log(`#${item.id} already handled by webRequest`);
     return;
   }
 
   const meta = metaStore.lookup(item.url, item.finalUrl);
+  // Defer on onCreated when Chromium hasn't resolved filename/size yet so
+  // onDeterminingFilename receives post-redirect URL, Content-Disposition, and totalBytes.
+  if (
+    !fromDetermining &&
+    !firefoxBlocking &&
+    chrome.downloads?.onDeterminingFilename &&
+    Date.now() >= forceUntil &&
+    item.totalBytes <= 0 &&
+    !meta?.contentLength &&
+    !meta?.confirmedDownload &&
+    settings.minSizeKB > 0 &&
+    !item.filename &&
+    /^https?:/i.test(url)
+  ) {
+    return;
+  }
+
+  if ((handledDownloadIds.get(item.id) || 0) > Date.now()) return;
+  handledDownloadIds.set(item.id, Date.now() + 60_000);
+  await log(`${fromDetermining ? "determining" : "created"} #${item.id} ${CAP.redactUrl(url)}`);
+
   const persistedHanded = await loadHandedBack();
   const referrer = item.referrer || meta?.referer || "";
   const pageUrl = meta?.pageUrl || referrer;
@@ -322,6 +360,7 @@ chrome.downloads.onCreated.addListener(async (item) => {
     settings,
     now: Date.now(),
     bypassUntil,
+    forceUntil,
     handedBack: persistedHanded,
     browserOnce,
   });
@@ -330,6 +369,7 @@ chrome.downloads.onCreated.addListener(async (item) => {
     await log(`#${item.id} skipped (${skipCheck.reason})`);
     return;
   }
+  if (skipCheck.clearForce) forceUntil = 0;
 
   // Pause first so the browser doesn't keep downloading while we ask the app.
   await chrome.downloads.pause(item.id).catch(() => {});
@@ -337,12 +377,17 @@ chrome.downloads.onCreated.addListener(async (item) => {
     await sendToApp({
       url,
       referrer,
+      origin: meta?.origin || "",
       pageUrl,
       filename,
       contentType: meta?.contentType || item.mime || null,
       contentLength: sizeBytes > 0 ? sizeBytes : null,
       userAgent: meta?.userAgent || navigator.userAgent,
+      confirmed: Boolean(meta?.confirmedDownload),
     });
+    const ts = Date.now();
+    pruneExpired(recentIntercepted, ts);
+    recentIntercepted.set(url.split("#")[0], ts + 15_000);
     await chrome.downloads.cancel(item.id).catch(() => {});
     await chrome.downloads.erase({ id: item.id }).catch(() => {});
     await log(`#${item.id} handed to MotlyDL`);
@@ -353,48 +398,72 @@ chrome.downloads.onCreated.addListener(async (item) => {
     await chrome.downloads.resume(item.id).catch(() => {});
     flashBadge("!", "#dc4b4b");
   }
+}
+
+chrome.downloads.onCreated.addListener((item) => {
+  void interceptChromeDownload(item, false);
 });
+
+if (!firefoxBlocking && chrome.downloads?.onDeterminingFilename) {
+  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    suggest();
+    void interceptChromeDownload(item, true);
+  });
+}
 
 // ---------- media detection ----------
 // Per tab, the video/audio files and streams the page has loaded. Kept in
 // session storage because the service worker can be stopped at any time.
 
-const MEDIA_EXT = /\.(mp4|m4v|webm|mkv|mov|avi|flv|wmv|mp3|m4a|aac|ogg|oga|opus|flac|wav)(?:$|[?#])/i;
-const STREAM_EXT = /\.(m3u8|mpd)(?:$|[?#])/i;
-const SEGMENT = /\.(ts|m4s|aac)(?:$|[?#])|[?&](range|bytestart)=/i;
-const MIN_FILE_BYTES = 512 * 1024;
 const key = (tabId) => `media:${tabId}`;
-
-function classify(url, mime, size) {
-  if (/mpegurl/i.test(mime) || /\.m3u8(?:$|[?#])/i.test(url)) return "hls";
-  if (/dash\+xml/i.test(mime) || /\.mpd(?:$|[?#])/i.test(url)) return "dash";
-  const isMedia = /^(video|audio)\//i.test(mime) || MEDIA_EXT.test(url);
-  if (!isMedia || /mp2t/i.test(mime) || SEGMENT.test(url)) return null;
-  if (size && size < MIN_FILE_BYTES) return null;
-  return "file";
-}
 
 function header(headers, name) {
   return headers?.find((h) => h.name.toLowerCase() === name)?.value || "";
 }
 
-async function recordMedia(tabId, url, kind, mime, size) {
+const DEDICATED_MEDIA_SITES = /(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com|tiktok\.com|soundcloud\.com)$/i;
+const mediaNotifyTimers = new Map();
+let activeManifestFetches = 0;
+
+function scheduleMediaPush(tabId, list) {
+  clearTimeout(mediaNotifyTimers.get(tabId));
+  mediaNotifyTimers.set(
+    tabId,
+    setTimeout(() => {
+      mediaNotifyTimers.delete(tabId);
+      const count = list.filter((m) => m.kind === "file").length + (list.some((m) => m.kind !== "file") ? 1 : 0);
+      if (count > 0) {
+        chrome.tabs.sendMessage(tabId, { type: "mediaFound", count, topKind: list[0]?.kind || "file" }, { frameId: 0 }).catch(() => {});
+      }
+    }, 300),
+  );
+}
+
+async function recordMedia(tabId, entry) {
+  const { url, kind } = entry;
   const { [key(tabId)]: list = [] } = await chrome.storage.session.get(key(tabId));
   if (list.some((m) => m.url === url)) return;
-  list.unshift({ url, kind, mime, size, at: Date.now() });
-  await chrome.storage.session.set({ [key(tabId)]: list.slice(0, 25) });
+  list.unshift({ ...entry, at: Date.now() });
+  const capped = list.slice(0, 25);
+  await chrome.storage.session.set({ [key(tabId)]: capped });
   refreshBadge(tabId);
-  // Read a stream's qualities now, while the video plays, so the menu has
-  // them the moment it opens. (Our own fetch has no tab, so it isn't caught.)
-  if (kind === "hls" || kind === "dash") {
-    streamQualities(url).then(async (qualities) => {
-      if (!qualities) return;
-      const { [key(tabId)]: now = [] } = await chrome.storage.session.get(key(tabId));
-      const item = now.find((m) => m.url === url);
-      if (!item) return;
-      item.qualities = qualities;
-      await chrome.storage.session.set({ [key(tabId)]: now });
-    }).catch(() => {});
+  scheduleMediaPush(tabId, capped);
+  // Skip eager manifest probing on infinite-scroll/dedicated extractor sites or when congested.
+  let mediaHost = "";
+  try { mediaHost = new URL(entry.pageUrl || url).hostname; } catch {}
+  if ((kind === "hls" || kind === "dash") && !DEDICATED_MEDIA_SITES.test(mediaHost) && activeManifestFetches < 2) {
+    activeManifestFetches++;
+    streamQualities(url)
+      .then(async (qualities) => {
+        if (!qualities) return;
+        const { [key(tabId)]: now = [] } = await chrome.storage.session.get(key(tabId));
+        const item = now.find((m) => m.url === url);
+        if (!item) return;
+        item.qualities = qualities;
+        await chrome.storage.session.set({ [key(tabId)]: now });
+      })
+      .catch(() => {})
+      .finally(() => { activeManifestFetches = Math.max(0, activeManifestFetches - 1); });
   }
 }
 
@@ -404,10 +473,20 @@ chrome.webRequest.onResponseStarted.addListener(
     const mime = header(d.responseHeaders, "content-type").split(";")[0].trim().toLowerCase();
     const range = header(d.responseHeaders, "content-range");
     const size = Number(range.split("/")[1]) || Number(header(d.responseHeaders, "content-length")) || 0;
-    const kind = classify(d.url, mime, size);
+    const kind = CAP.classifyMedia(d.url, mime, size, Boolean(range));
     if (!kind) return;
-    const url = d.url.replace(/([?&])(range|rn|rbuf)=[^&]*/gi, "$1").replace(/[?&]$/, "");
-    void recordMedia(d.tabId, url, kind, mime, size);
+    const url = CAP.stripRangeParams(d.url);
+    const meta = metaStore.lookup(d.url, null, d.requestId);
+    void recordMedia(d.tabId, {
+      url,
+      kind,
+      mime,
+      size,
+      referer: meta?.referer || d.documentUrl || d.initiator || "",
+      origin: meta?.origin || "",
+      pageUrl: meta?.pageUrl || d.documentUrl || "",
+      userAgent: meta?.userAgent || "",
+    });
   },
   { urls: ["http://*/*", "https://*/*"], types: ["media", "xmlhttprequest", "other", "object"] },
   ["responseHeaders"],
@@ -526,7 +605,11 @@ async function refreshBadge(tabId) {
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading" && info.url) chrome.storage.session.remove(key(tabId)).then(() => refreshBadge(tabId));
 });
-chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove(key(tabId)));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearTimeout(mediaNotifyTimers.get(tabId));
+  mediaNotifyTimers.delete(tabId);
+  chrome.storage.session.remove(key(tabId));
+});
 
 // ---------- right-click menu ----------
 
@@ -566,6 +649,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     switch (msg?.type) {
       case "ping": return ping();
       case "bypass": bypassUntil = Date.now() + 4000; return { ok: true };
+      case "force": forceUntil = Date.now() + 4000; return { ok: true };
       case "media": return { items: await mediaFor(tabId), disabled: await siteDisabled(pageUrl) };
       case "prepare":
         try {
@@ -576,7 +660,16 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         try { return { qualities: await streamQualities(msg.url) }; } catch (e) { return { qualities: null, error: String(e?.message || e) }; }
       case "grab":
         try {
-          await sendToApp({ url: msg.url, referrer: pageUrl, filename: msg.filename, qualities: msg.qualities, pick: msg.pick });
+          await sendToApp({
+            url: msg.url,
+            referrer: msg.referer || pageUrl,
+            origin: msg.origin || "",
+            pageUrl,
+            filename: msg.filename,
+            userAgent: msg.userAgent || "",
+            qualities: msg.qualities,
+            pick: msg.pick,
+          });
           return { ok: true };
         } catch (e) {
           return { ok: false, error: String(e?.message || e) };

@@ -72,7 +72,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             download_dir: PathBuf::new(),
-            connections: 8,
+            connections: 16,
             max_concurrent: 3,
             speed_limit_kib: 0,
             sort_into_categories: true,

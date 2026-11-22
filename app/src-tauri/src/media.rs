@@ -20,7 +20,7 @@ use motlydl_engine::{CancellationToken, Client, Outcome, Progress};
 /// Sites sent to yt-dlp instead of the regular engine.
 const SITES: &[&str] = &[
     "youtube.com", "youtu.be", "youtube-nocookie.com", "vimeo.com", "x.com", "twitter.com", "reddit.com",
-    "instagram.com", "tiktok.com", "facebook.com", "twitch.tv", "dailymotion.com", "soundcloud.com", "bilibili.com",
+    "instagram.com", "tiktok.com", "facebook.com", "twitch.tv", "dailymotion.com", "soundcloud.com", "on.soundcloud.com", "bilibili.com",
 ];
 
 /// A video stream: an HLS playlist (.m3u8) or a DASH manifest (.mpd). These
@@ -430,7 +430,12 @@ pub async fn probe(client: &Client, url: &str, headers: Vec<(String, String)>) -
     let tools = ensure_tools(client, &PROBE_NOTE, false).await?;
     *PROBE_NOTE.lock().unwrap() = None;
     let quick = read_info(tools.ytdlp.clone(), url.to_string(), headers.clone(), false).await;
-    let enough = |i: &MediaInfo| i.qualities.iter().any(|q| q.label.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("").parse::<u32>().is_ok_and(|h| h > 480));
+    // Non-YouTube sites (SoundCloud audio, TikTok, etc.) don't need YouTube's
+    // high-res JS runtime pass once the first lookup already succeeded.
+    let enough = |i: &MediaInfo| {
+        youtube_id(url).is_none()
+            || i.qualities.iter().any(|q| q.label.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("").parse::<u32>().is_ok_and(|h| h > 480))
+    };
     match quick {
         Ok(info) if enough(&info) || js_runtime().is_none() => Ok(info),
         quick => {
@@ -639,7 +644,25 @@ fn qualities(info: &Value) -> Vec<Quality> {
             out
         })
         .collect();
-    if let Some(a) = best_audio {
+    if videos.is_empty() && !audios.is_empty() {
+        let mut sorted = audios;
+        sorted.sort_unstable_by(|a, b| tbr(&b).total_cmp(&tbr(&a)));
+        let mut seen = std::collections::HashSet::new();
+        for a in sorted {
+            let Some(fid) = a["format_id"].as_str() else { continue };
+            let ext = a["ext"].as_str().unwrap_or("mp3").to_string();
+            let kbps = tbr(&a).round() as u64;
+            if !seen.insert((ext.clone(), kbps)) {
+                continue;
+            }
+            let label = if kbps > 0 {
+                format!("Audio · {} {kbps} kbps", ext.to_ascii_uppercase())
+            } else {
+                format!("Audio · {}", ext.to_ascii_uppercase())
+            };
+            list.push(Quality { label, format: fid.to_string(), ext, size: size_of(a) });
+        }
+    } else if let Some(a) = best_audio {
         let m4a = audios.iter().any(|f| f["ext"].as_str() == Some("m4a"));
         list.push(Quality {
             label: "Audio only".into(),
@@ -860,7 +883,7 @@ async fn direct(client: &Client, job: &Job, progress: &Arc<Progress>, note: &Not
 #[allow(clippy::too_many_arguments)]
 async fn attempt(tools: &Tools, job: &Job, progress: &Arc<Progress>, note: &Note, cancel: &CancellationToken, stream: bool, merges: bool, with_js: bool) -> Result<(Option<bool>, String)> {
     let mut cmd = if with_js { ytdlp_command(&tools.ytdlp) } else { command(&tools.ytdlp) };
-    cmd.args(["-f", &job.format, "--no-playlist", "--newline", "--no-colors", "--no-mtime", "-N", "4"])
+    cmd.args(["-f", &job.format, "--no-playlist", "--newline", "--no-colors", "--no-mtime", "-N", "16", "--http-chunk-size", "10M"])
         .args(["--progress-template", "download:SDL|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s"]);
     if merges {
         cmd.args(["--merge-output-format", "mp4"]);
@@ -1084,8 +1107,27 @@ mod tests {
         assert!(is_media_url("https://www.youtube.com/watch?v=aqz-KE-bpKQ"));
         assert!(is_media_url("https://youtu.be/aqz-KE-bpKQ"));
         assert!(is_media_url("https://m.youtube.com/shorts/x"));
+        assert!(is_media_url("https://soundcloud.com/artist/track"));
+        assert!(is_media_url("https://on.soundcloud.com/AbCdEf"));
+        assert!(is_media_url("https://www.tiktok.com/@user/video/123"));
+        assert!(is_media_url("https://vt.tiktok.com/ZSYabc123/"));
         assert!(!is_media_url("https://drive.usercontent.google.com/download?id=1"));
         assert!(!is_media_url("https://notyoutube.com/watch"));
+    }
+
+    #[test]
+    fn lists_audio_choices_for_audio_only_sites_like_soundcloud() {
+        let info = serde_json::json!({ "formats": [
+            { "format_id": "http_mp3_1_0", "vcodec": "none", "acodec": "mp3", "ext": "mp3", "tbr": 128.0, "filesize": 3200000 },
+            { "format_id": "hls_opus_1_0", "vcodec": "none", "acodec": "opus", "ext": "opus", "tbr": 64.0, "filesize": 1600000 },
+        ]});
+        let q = qualities(&info);
+        assert_eq!(q.len(), 2);
+        assert_eq!(q[0].label, "Audio · MP3 128 kbps");
+        assert_eq!(q[0].ext, "mp3");
+        assert_eq!(q[0].format, "http_mp3_1_0");
+        assert_eq!(q[1].label, "Audio · OPUS 64 kbps");
+        assert_eq!(q[1].ext, "opus");
     }
 
     #[test]

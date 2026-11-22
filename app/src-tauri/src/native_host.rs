@@ -60,11 +60,11 @@ fn handle(msg: &[u8]) -> Value {
             // The site won't give MotlyDL this file: say so, and the extension
             // lets the browser keep (and finish) its own download.
             Some(why) => json!({ "ok": false, "error": why }),
-            None => reply(launch_app(&["--add", &URL_SAFE_NO_PAD.encode(msg)])),
+            None => reply(launch_payload("--add-file", "--add", msg)),
         },
         Some("show") => reply(launch_app(&[])),
         // The quality menu opened on a video: start looking it up now.
-        Some("prepare") if v["url"].is_string() => reply(launch_app(&["--prepare", &URL_SAFE_NO_PAD.encode(msg)])),
+        Some("prepare") if v["url"].is_string() => reply(launch_payload("--prepare-file", "--prepare", msg)),
         _ => json!({ "ok": false, "error": "unknown message" }),
     }
 }
@@ -74,6 +74,9 @@ fn handle(msg: &[u8]) -> Value {
 /// download. Network trouble and slow answers are not refusals; the app deals
 /// with those.
 fn refused(v: &Value) -> Option<String> {
+    if v["confirmed"].as_bool() == Some(true) {
+        return None;
+    }
     let inc: crate::manager::Incoming = serde_json::from_value(v.clone()).ok()?;
     let plain = inc.url.starts_with("http") && !crate::media::is_media_url(&inc.url) && !crate::torrent::is_torrent(&inc.url, inc.filename.as_deref());
     if !plain {
@@ -90,6 +93,75 @@ fn refused(v: &Value) -> Option<String> {
     let result = tauri::async_runtime::block_on(probe)?;
     let err = format!("{:#}", result.err()?);
     (err.starts_with("server returned") || err.starts_with("This link opens a web page")).then(|| format!("{err}. The browser keeps this download."))
+}
+
+fn ipc_dir() -> std::path::PathBuf {
+    crate::browser::data_dir().join("ipc")
+}
+
+fn is_safe_ipc_file(path: &std::path::Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if !name.starts_with("msg-") || !name.ends_with(".json") {
+        return false;
+    }
+    let Ok(ipc_canon) = std::fs::canonicalize(ipc_dir()) else {
+        return false;
+    };
+    let Ok(canon) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    canon.parent() == Some(ipc_canon.as_path())
+}
+
+fn write_ipc_payload(msg: &[u8]) -> io::Result<std::path::PathBuf> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let dir = ipc_dir();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(&dir)?;
+    }
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("msg-{}-{seq}.json", std::process::id()));
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(&path)?;
+    file.write_all(msg)?;
+    Ok(path)
+}
+
+/// Hands sensitive request payloads (cookies/headers) through a 0600 file rather
+/// than process argv, falling back to inline base64 if file creation fails.
+fn launch_payload(file_flag: &str, inline_flag: &str, msg: &[u8]) -> io::Result<()> {
+    match write_ipc_payload(msg) {
+        Ok(path) => {
+            let p = path.to_string_lossy().into_owned();
+            let res = launch_app(&[file_flag, &p]);
+            if res.is_err() {
+                let _ = std::fs::remove_file(&path);
+            }
+            res
+        }
+        Err(_) => launch_app(&[inline_flag, &URL_SAFE_NO_PAD.encode(msg)]),
+    }
 }
 
 /// Starts the app with `args`. If it is already open, the single-instance
@@ -259,18 +331,31 @@ mod process_tree {
     }
 }
 
-/// Pulls the `--prepare <payload>` the host passed on, if any.
-pub fn parse_prepare_arg(args: &[String]) -> Option<crate::manager::Incoming> {
-    let i = args.iter().position(|a| a == "--prepare")?;
+fn parse_payload_arg(args: &[String], file_flag: &str, inline_flag: &str) -> Option<crate::manager::Incoming> {
+    if let Some(i) = args.iter().position(|a| a == file_flag)
+        && let Some(path) = args.get(i + 1)
+    {
+        let p = std::path::Path::new(path);
+        if !is_safe_ipc_file(p) {
+            return None;
+        }
+        let raw = std::fs::read(p).ok();
+        let _ = std::fs::remove_file(p);
+        return raw.and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    }
+    let i = args.iter().position(|a| a == inline_flag)?;
     let raw = URL_SAFE_NO_PAD.decode(args.get(i + 1)?).ok()?;
     serde_json::from_slice(&raw).ok()
 }
 
-/// Pulls the `--add <payload>` the host passed on, if any.
+/// Pulls the `--prepare-file` / `--prepare` payload the host passed on, if any.
+pub fn parse_prepare_arg(args: &[String]) -> Option<crate::manager::Incoming> {
+    parse_payload_arg(args, "--prepare-file", "--prepare")
+}
+
+/// Pulls the `--add-file` / `--add` payload the host passed on, if any.
 pub fn parse_add_arg(args: &[String]) -> Option<crate::manager::Incoming> {
-    let i = args.iter().position(|a| a == "--add")?;
-    let raw = URL_SAFE_NO_PAD.decode(args.get(i + 1)?).ok()?;
-    serde_json::from_slice(&raw).ok()
+    parse_payload_arg(args, "--add-file", "--add")
 }
 
 #[cfg(test)]
@@ -304,8 +389,26 @@ mod refusal_tests {
         assert!(ask(&page).unwrap().contains("web page"));
         let file = serve("HTTP/1.1 206 Partial Content\r\nContent-Type: application/zip\r\nContent-Range: bytes 0-0/1000\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx");
         assert_eq!(ask(&file), None, "a working link is taken over");
+        assert_eq!(refused(&serde_json::json!({ "type": "download", "url": forbidden, "confirmed": true })), None, "confirmed response skips extra probe");
         assert_eq!(ask("http://127.0.0.1:1/unreachable.zip"), None, "no answer is not a refusal");
         assert_eq!(ask("https://www.youtube.com/watch?v=abc"), None, "video pages go through yt-dlp");
+    }
+
+    #[test]
+    fn reads_and_deletes_file_ipc_payload() {
+        let p = super::write_ipc_payload(br#"{"url":"https://example.com/a.zip","origin":"https://example.com"}"#).unwrap();
+        let args = vec!["motlydl".into(), "--add-file".into(), p.to_string_lossy().into_owned()];
+        let inc = super::parse_add_arg(&args).unwrap();
+        assert_eq!(inc.url, "https://example.com/a.zip");
+        assert_eq!(inc.origin.as_deref(), Some("https://example.com"));
+        assert!(!p.exists(), "temporary payload file is deleted after reading");
+
+        let outside = std::env::temp_dir().join(format!("motlydl-outside-test-{}.json", std::process::id()));
+        std::fs::write(&outside, r#"{"url":"https://example.com/b.zip"}"#).unwrap();
+        let outside_args = vec!["motlydl".into(), "--add-file".into(), outside.to_string_lossy().into_owned()];
+        assert!(super::parse_add_arg(&outside_args).is_none(), "paths outside ipc_dir are rejected");
+        assert!(outside.exists(), "outside file must not be deleted on rejection");
+        let _ = std::fs::remove_file(&outside);
     }
 }
 

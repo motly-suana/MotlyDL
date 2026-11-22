@@ -31,8 +31,9 @@
       <header class="header" data-tauri-drag-region>
         <div class="h-title" data-tauri-drag-region><span class="h-icon" id="h-icon"></span><span id="h-name">All downloads</span><span class="h-count" id="h-count"></span></div>
         <div class="h-actions">
-          <button class="ghost-btn" id="btn-pause-all"><i data-icon="pause"></i>Pause all</button>
-          <button class="ghost-btn" id="btn-resume-all"><i data-icon="play"></i>Resume all</button>
+          <button class="btn primary sm" id="btn-add-main" title="New download (Ctrl N)"><i data-icon="plus"></i><span>New download</span></button>
+          <button class="ghost-btn" id="btn-pause-all"><i data-icon="pause"></i><span>Pause all</span></button>
+          <button class="ghost-btn" id="btn-resume-all"><i data-icon="play"></i><span>Resume all</span></button>
           <button class="search-btn" id="btn-search"><i data-icon="search"></i><span>Search</span><kbd>Ctrl K</kbd></button>
           <span class="win-ctrls" id="win-ctrls">
             <button id="w-min" title="Minimize"><svg viewBox="0 0 10 10"><path d="M1 5h8" /></svg></button>
@@ -41,6 +42,15 @@
           </span>
         </div>
       </header>
+      <div class="toolbar">
+        <form class="quick-bar" id="quick-form">
+          <span class="qb-ic"><i data-icon="link"></i></span>
+          <input id="quick-url" type="text" placeholder="Paste a link to download — file, YouTube, TikTok, SoundCloud, magnet…" autocomplete="off" spellcheck="false" aria-label="Download URL">
+          <button type="button" class="qb-paste" id="quick-paste" title="Paste link from clipboard"><i data-icon="clipboard"></i><span>Paste</span></button>
+          <button type="submit" class="btn primary sm" id="quick-go"><i data-icon="download"></i><span>Download</span></button>
+        </form>
+        <div class="stats-strip" id="stats-strip"></div>
+      </div>
       <div class="body">
         <div class="list" id="list">
           <div class="onboard" id="update" hidden></div>

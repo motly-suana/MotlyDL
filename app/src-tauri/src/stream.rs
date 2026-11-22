@@ -16,7 +16,7 @@ use motlydl_engine::{CancellationToken, Client, Outcome, Progress, header::Heade
 use url::Url;
 
 /// Pieces fetched at once.
-const PARALLEL: usize = 8;
+const PARALLEL: usize = 16;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Key {
@@ -496,7 +496,7 @@ pub async fn run(client: &Client, job: Job, progress: Arc<Progress>, note: crate
     set("Joining");
     let joined = |tag: &str| -> Result<PathBuf> {
         let out = parts.join(format!("{tag}.joined"));
-        let mut w = std::io::BufWriter::new(std::fs::File::create(&out)?);
+        let mut w = std::io::BufWriter::with_capacity(512 * 1024, std::fs::File::create(&out)?);
         for (path, _) in all.iter().filter(|(p, _)| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&format!("{tag}-")))) {
             std::io::copy(&mut std::fs::File::open(path)?, &mut w)?;
         }
