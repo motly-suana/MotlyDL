@@ -1,10 +1,21 @@
 # Changelog
 
-All notable changes to SwiftDL are documented here. The format follows
+All notable changes to MotlyDL are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.4.3] - 2026-11-22
+
+### Changed
+- Rebranded the desktop app, CLI, browser extension, docs, and icon/avatar suite to **MotlyDL** (`com.motlydl.app`).
+- Optimized background resource usage: lazily create and destroy the `"main"` WebView when closing to the tray, switched the Rust ticker to an event-driven wake loop (0 wakeups/sec while idle), cached browser executable probes (5-minute TTL), tuned HTTP connection pool idle limits, throttled hidden/idle UI polling and canvas repaints, and added lightweight O(1) filtering in extension listeners.
+
+### Added
+- Native checksum verification (`MD5`, `SHA-1`, `SHA-256`, `SHA-512`) and sidecar support.
+- Firefox `onHeadersReceived` blocking download interception with shared `capture.js` filters and unit tests.
+- Forwarded `bind_address` settings across `yt-dlp` and native-host refusals, expired-link auto-refresh, MIME category fallback, and per-category download folders.
 
 ## [0.4.2] - 2026-11-18
 
@@ -326,7 +337,8 @@ uses [Semantic Versioning](https://semver.org/).
 - GitHub Actions for CI and tagged releases (Windows, macOS, Linux and the
   extension zip).
 
-[Unreleased]: https://github.com/harshsinghsv/swiftdl/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/motly-suana/MotlyDL/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/motly-suana/MotlyDL/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/harshsinghsv/swiftdl/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/harshsinghsv/swiftdl/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/harshsinghsv/swiftdl/compare/v0.3.5...v0.4.0
